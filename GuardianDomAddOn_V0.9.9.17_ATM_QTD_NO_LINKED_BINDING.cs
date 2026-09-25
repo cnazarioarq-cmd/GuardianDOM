@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -123,6 +124,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private InstrumentSelector instrumentSelector;
         private AccountSelector accountSelector;
         private QuantityUpDown quantitySelector;
+        private NinjaTrader.Gui.NinjaScript.AtmStrategy.AtmStrategySelector atmStrategySelector;
+        private System.Windows.Threading.DispatcherTimer atmDiagTimer;
+        private NinjaTrader.NinjaScript.AtmStrategy lastAutoQtyAtm;
 
         private Instrument currentInstrument;
         private MarketData marketData;
@@ -269,6 +273,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             selectors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.0, GridUnitType.Star) });
             selectors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.6, GridUnitType.Star) });
             selectors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
+            selectors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            selectors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             StackPanel instrumentPanel = CreateSelectorPanel("ATIVO");
             instrumentSelector = new InstrumentSelector
@@ -278,6 +284,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             instrumentSelector.InstrumentChanged += OnInstrumentChanged;
             instrumentPanel.Children.Add(instrumentSelector);
             Grid.SetColumn(instrumentPanel, 0);
+            Grid.SetRow(instrumentPanel, 0);
             selectors.Children.Add(instrumentPanel);
 
             StackPanel accountPanel = CreateSelectorPanel("CONTA");
@@ -287,8 +294,10 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             };
             accountPanel.Children.Add(accountSelector);
             Grid.SetColumn(accountPanel, 1);
+            Grid.SetRow(accountPanel, 0);
             selectors.Children.Add(accountPanel);
 
+            // V0.9.9.3 ATM: QTD voltou a ficar visível; a entrada usa a quantidade escolhida no GuardianDOM.
             StackPanel quantityPanel = CreateSelectorPanel("QTD");
             quantitySelector = new QuantityUpDown
             {
@@ -297,7 +306,31 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             };
             quantityPanel.Children.Add(quantitySelector);
             Grid.SetColumn(quantityPanel, 2);
+            Grid.SetRow(quantityPanel, 0);
             selectors.Children.Add(quantityPanel);
+
+            StackPanel atmPanel = CreateSelectorPanel("ESTRATÉGIA ATM");
+            atmStrategySelector = new NinjaTrader.Gui.NinjaScript.AtmStrategy.AtmStrategySelector
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Margin = new Thickness(0, 4, 0, 0)
+            };
+            atmStrategySelector.SetBinding(
+                NinjaTrader.Gui.NinjaScript.AtmStrategy.AtmStrategySelector.AccountProperty,
+                new Binding { Source = accountSelector, Path = new PropertyPath("SelectedAccount") });
+            // V0.9.9.17: não escrever QTD em LinkedQuantity.
+            // O AtmStrategySelector mantém internamente a configuração do template ATM.
+            atmPanel.Children.Add(atmStrategySelector);
+
+            // V0.9.9.17: sincroniza QTD UMA VEZ pela EntryQuantity, sem binding em LinkedQuantity.
+            atmDiagTimer = new System.Windows.Threading.DispatcherTimer();
+            atmDiagTimer.Interval = TimeSpan.FromMilliseconds(300);
+            atmDiagTimer.Tick += AtmDiagTimer_Tick;
+            atmDiagTimer.Start();
+            Grid.SetRow(atmPanel, 1);
+            Grid.SetColumn(atmPanel, 0);
+            Grid.SetColumnSpan(atmPanel, 3);
+            selectors.Children.Add(atmPanel);
 
             Grid.SetRow(selectors, 1);
             root.Children.Add(selectors);
@@ -444,7 +477,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.8.3 BE1 ONLY • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
+                Text = "V0.9.9.3 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -560,6 +593,36 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             return root;
         }
 
+        private void AtmDiagTimer_Tick(object sender, EventArgs e)
+        {
+            if (atmStrategySelector == null || quantitySelector == null)
+                return;
+
+            NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
+
+            if (selectedAtm == null)
+            {
+                lastAutoQtyAtm = null;
+                return;
+            }
+
+            // IMPORTANTE:
+            // O timer apenas DETECTA a troca da ATM. A quantidade é escrita UMA VEZ
+            // por nova seleção, evitando reescrever QTD/LinkedQuantity durante
+            // criação, envio ou gerenciamento da ordem ATM.
+            if (!object.ReferenceEquals(selectedAtm, lastAutoQtyAtm))
+            {
+                lastAutoQtyAtm = selectedAtm;
+
+                int atmQty = selectedAtm.EntryQuantity;
+                if (atmQty > 0 && quantitySelector.Value != atmQty)
+                    quantitySelector.Value = atmQty;
+            }
+
+            if (Caption != "Guardian DOM")
+                Caption = "Guardian DOM";
+        }
+
         private void PreviewOrderAtRow(int rowIndex, string side)
         {
             if (currentInstrument == null || rowIndex < 0 || rowIndex >= LadderRows)
@@ -605,6 +668,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             bool ready = currentInstrument != null
                 && !double.IsNaN(previewOrderPrice)
                 && previewOrderQuantity > 0
+                && atmStrategySelector != null
+                && atmStrategySelector.SelectedAtmStrategy != null
                 && (previewOrderType == "LIMIT" || previewOrderType == "STOP MARKET");
 
             sendPreviewButton.IsEnabled = sim101 && ready;
@@ -616,7 +681,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.3 ATM • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -640,7 +705,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     limitPrice,
                     stopPrice,
                     string.Empty,
-                    "GuardianDOM",
+                    "Entry",
                     Core.Globals.MaxDate,
                     null);
 
@@ -655,7 +720,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 beEntryFillPrice = double.NaN;
                 beEntryDirection = 0;
 
-                account.Submit(new[] { order });
+                NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
+                if (selectedAtm == null)
+                {
+                    connectionStatus.Text = "V0.9.9.3 ATM • SELECIONE UMA ESTRATÉGIA ATM";
+                    return;
+                }
+
+                // StartAtmStrategy envia a entrada e, após o fill, deixa o ATM nativo
+                // administrar stop, alvo, breakeven e trailing do template escolhido.
+                NinjaTrader.NinjaScript.AtmStrategy.StartAtmStrategy(selectedAtm, order);
                 guardianSubmittedOrder = order;
                 guardianOrderStatus = "ENVIADA";
                 if (orderStateStatus != null)
@@ -674,7 +748,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.8.3 BE1 ONLY • ENVIADA: " + previewOrderSide +
+                    "V0.9.9.3 ATM • ENVIADA: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • Sim101";
@@ -683,7 +757,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • ERRO AO ENVIAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.3 ATM • ERRO AO ENVIAR: " + ex.Message;
             }
         }
 
@@ -693,13 +767,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.3 ATM • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.3 ATM • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -709,12 +783,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.3 ATM • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.3 ATM • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -800,7 +874,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.8.3 BE1 ONLY • STOP " +
+                "V0.9.9.3 ATM • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -833,25 +907,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             if (!isEntry && !isStop && !isTarget)
                 return;
 
-            // A entrada confirmada cria o bracket apenas uma vez.
-            if (isEntry && e.Order.OrderState == OrderState.Filled && !bracketSubmittedForEntry)
+            // V0.9.9.0: a proteção pertence à ATM nativa selecionada.
+            // Não cria bracket próprio do GuardianDOM.
+            if (isEntry && e.Order.OrderState == OrderState.Filled)
             {
-                try
-                {
-                    SubmitProtectiveBracket(e.Order);
-                }
-                catch (Exception ex)
-                {
-                    Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        if (orderStateStatus != null)
-                        {
-                            orderStateStatus.Text = "ERRO AO CRIAR STOP/ALVO";
-                            orderStateStatus.Foreground = Brushes.OrangeRed;
-                        }
-                        connectionStatus.Text = "V0.9.8.3 BE1 ONLY • ERRO: " + ex.Message;
-                    }));
-                }
+                bracketSubmittedForEntry = true;
+                beMonitorActive = false;
             }
 
             Dispatcher.BeginInvoke(new Action(() =>
@@ -874,8 +935,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.8.3 BE1 ONLY • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.8.3 BE1 ONLY • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.3 ATM • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.3 ATM • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -884,7 +945,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.8.3 BE1 ONLY • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.3 ATM • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -911,7 +972,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         statePt = "PENDENTE";
                         break;
                     case OrderState.Filled:
-                        statePt = bracketSubmittedForEntry ? "EXECUTADA + PROTEGIDA" : "EXECUTADA";
+                        statePt = bracketSubmittedForEntry ? "EXECUTADA + ATM" : "EXECUTADA";
                         break;
                     case OrderState.Cancelled:
                         statePt = "CANCELADA";
@@ -931,7 +992,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 {
                     orderStateStatus.Text =
                         (state == OrderState.Filled && bracketSubmittedForEntry)
-                        ? "POSIÇÃO PROTEGIDA • STOP 40t • ALVO 50t"
+                        ? "POSIÇÃO PROTEGIDA • ATM ATIVA"
                         : "ORDEM: " + statePt;
 
                     if (state == OrderState.Filled)
@@ -945,7 +1006,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.8.3 BE1 ONLY • ORDEM: " + statePt +
+                    "V0.9.9.3 ATM • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -985,7 +1046,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.8.3 BE1 ONLY • " + previewOrderSide +
+                "V0.9.9.3 ATM • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1036,11 +1097,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.3 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.8.3 BE1 ONLY • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
+            connectionStatus.Text = "V0.9.9.3 ATM • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1302,7 +1363,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.3 ATM • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1352,7 +1413,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     "   •   VAL: " + valText;
             }
 
-            // V0.9.8.3 BE1 ONLY: keep the ladder centered on the live inside market.
+            // V0.9.9.3 ATM: keep the ladder centered on the live inside market.
             // Prefer the midpoint of Bid/Ask; fall back to Last when needed.
             double anchor;
 
@@ -1365,11 +1426,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.8.3 BE1 ONLY • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.3 ATM • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.8.3 BE1 ONLY • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.3 ATM • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0 ? "OK" : "AGUARDANDO VOLUMEPRO")
                 + (ladderManualNavigation ? " • LADDER: MANUAL " + (ladderOffsetTicks >= 0 ? "+" : "") + ladderOffsetTicks.ToString() + "t" : " • LADDER: AUTO")
                 + " • ENVIO SOMENTE POR BOTÃO / Sim101";
@@ -1428,7 +1489,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 buyFlowBars[row].Width = Math.Max(0, buyWidth);
                 sellFlowBars[row].Width = Math.Max(0, sellWidth);
 
-                // V0.9.8.3 BE1 ONLY: o preço não depende de MarketDepth.
+                // V0.9.9.3 ATM: o preço não depende de MarketDepth.
                 // A leitura visual do fluxo fica nas colunas COMPRA/VENDA.
                 Brush priceBackground = new SolidColorBrush(Color.FromRgb(62, 62, 65));
 
@@ -1570,6 +1631,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             if (instrumentSelector != null)
                 instrumentSelector.InstrumentChanged -= OnInstrumentChanged;
 
+            if (atmDiagTimer != null)
+            {
+                atmDiagTimer.Stop();
+                atmDiagTimer.Tick -= AtmDiagTimer_Tick;
+                atmDiagTimer = null;
+            }
+
+            lastAutoQtyAtm = null;
+
             UnsubscribeMarketData();
 
             if (instrumentSelector != null)
@@ -1586,6 +1656,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderAccount.OrderUpdate -= GuardianOrderAccount_OrderUpdate;
                 guardianOrderAccount = null;
             }
+
+            if (atmStrategySelector != null)
+                atmStrategySelector.Cleanup();
 
             if (accountSelector != null)
                 accountSelector.Cleanup();
