@@ -177,6 +177,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private TextBlock askValue;
         private TextBlock connectionStatus;
         private TextBlock profileStatus;
+        private TextBlock aggressionBalanceStatus;
         private TextBlock orderStateStatus;
         private Button sendPreviewButton;
         private Button cancelOrderButton;
@@ -210,6 +211,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private Border[] volumeBorders;
         private Grid[] volumeGrids;
         private Border[] volumeBars;
+
+        // V0.9.9.24 - Delta por nível = agressão compradora - agressão vendedora.
+        private TextBlock[] deltaCells;
+        private TextBlock[] deltaNegativeCells;
+        private TextBlock[] deltaPositiveCells;
+        private Border[] deltaBorders;
+        private Grid[] deltaGrids;
+        private Border[] deltaPositiveBars;
+        private Border[] deltaNegativeBars;
 
         private double lastPrice;
         private double bidPrice;
@@ -377,15 +387,37 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 Background = new SolidColorBrush(Color.FromRgb(32, 32, 34))
             };
 
-            columnHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            columnHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
-            columnHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            columnHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
+            ColumnDefinition headerSellCol = new ColumnDefinition { Width = new GridLength(90) };
+            ColumnDefinition headerPriceCol = new ColumnDefinition { Width = new GridLength(100) };
+            ColumnDefinition headerBuyCol = new ColumnDefinition { Width = new GridLength(90) };
+            ColumnDefinition headerVolumeCol = new ColumnDefinition { Width = new GridLength(75) };
+            ColumnDefinition headerDeltaCol = new ColumnDefinition { Width = new GridLength(115) };
 
-            AddHeaderCell(columnHeader, "COMPRA", 0);
+            columnHeader.ColumnDefinitions.Add(headerSellCol);
+            columnHeader.ColumnDefinitions.Add(headerPriceCol);
+            columnHeader.ColumnDefinitions.Add(headerBuyCol);
+            columnHeader.ColumnDefinitions.Add(headerVolumeCol);
+            columnHeader.ColumnDefinitions.Add(headerDeltaCol);
+
+            AddHeaderCell(columnHeader, "VENDA", 0);
             AddHeaderCell(columnHeader, "PREÇO", 1);
-            AddHeaderCell(columnHeader, "VENDA", 2);
+            AddHeaderCell(columnHeader, "COMPRA", 2);
             AddHeaderCell(columnHeader, "VOLUME", 3);
+            AddHeaderCell(columnHeader, "DELTA", 4);
+
+            // V0.9.9.38 - linha inferior contínua para destacar o cabeçalho da ladder.
+            Border headerBottomSeparator = new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Color.FromRgb(105, 105, 105)),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                IsHitTestVisible = false
+            };
+            Grid.SetColumn(headerBottomSeparator, 0);
+            Grid.SetColumnSpan(headerBottomSeparator, 5);
+            Panel.SetZIndex(headerBottomSeparator, 850);
+            columnHeader.Children.Add(headerBottomSeparator);
 
             Grid.SetRow(columnHeader, 3);
             root.Children.Add(columnHeader);
@@ -396,10 +428,160 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 Background = new SolidColorBrush(Color.FromRgb(36, 36, 39))
             };
 
-            ladder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            ladder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
-            ladder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            ladder.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
+            ColumnDefinition ladderSellCol = new ColumnDefinition { Width = new GridLength(90), MinWidth = 45 };
+            ColumnDefinition ladderPriceCol = new ColumnDefinition { Width = new GridLength(100), MinWidth = 60 };
+            ColumnDefinition ladderBuyCol = new ColumnDefinition { Width = new GridLength(90), MinWidth = 45 };
+            ColumnDefinition ladderVolumeCol = new ColumnDefinition { Width = new GridLength(75), MinWidth = 50 };
+            ColumnDefinition ladderDeltaCol = new ColumnDefinition { Width = new GridLength(115), MinWidth = 60 };
+
+            ladder.ColumnDefinitions.Add(ladderSellCol);
+            ladder.ColumnDefinitions.Add(ladderPriceCol);
+            ladder.ColumnDefinitions.Add(ladderBuyCol);
+            ladder.ColumnDefinitions.Add(ladderVolumeCol);
+            ladder.ColumnDefinitions.Add(ladderDeltaCol);
+
+            // V0.9.9.35 - dimensionadores independentes no cabeçalho.
+            // Não usam GridSplitter e não entram na árvore da ladder.
+            ColumnDefinition[] headerCols = new ColumnDefinition[]
+            {
+                headerSellCol, headerPriceCol, headerBuyCol, headerVolumeCol, headerDeltaCol
+            };
+            ColumnDefinition[] ladderCols = new ColumnDefinition[]
+            {
+                ladderSellCol, ladderPriceCol, ladderBuyCol, ladderVolumeCol, ladderDeltaCol
+            };
+            double[] minWidths = new double[] { 45, 60, 45, 50, 60 };
+
+            for (int h = 0; h < 4; h++)
+            {
+                int handleIndex = h;
+                Border handle = new Border
+                {
+                    Width = 5,
+                    Background = new SolidColorBrush(Color.FromArgb(150, 105, 105, 105)),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Cursor = Cursors.SizeWE
+                };
+
+                bool dragging = false;
+                double startX = 0;
+                double leftStart = 0;
+                double rightStart = 0;
+
+                handle.MouseLeftButtonDown += (s, e) =>
+                {
+                    dragging = true;
+                    startX = e.GetPosition(columnHeader).X;
+                    leftStart = headerCols[handleIndex].ActualWidth;
+                    rightStart = headerCols[handleIndex + 1].ActualWidth;
+                    ((Border)s).CaptureMouse();
+                    e.Handled = true;
+                };
+
+                handle.MouseMove += (s, e) =>
+                {
+                    if (!dragging || e.LeftButton != MouseButtonState.Pressed)
+                        return;
+
+                    double dx = e.GetPosition(columnHeader).X - startX;
+                    double newLeft = leftStart + dx;
+                    double newRight = rightStart - dx;
+
+                    if (newLeft < minWidths[handleIndex])
+                    {
+                        newLeft = minWidths[handleIndex];
+                        newRight = leftStart + rightStart - newLeft;
+                    }
+                    if (newRight < minWidths[handleIndex + 1])
+                    {
+                        newRight = minWidths[handleIndex + 1];
+                        newLeft = leftStart + rightStart - newRight;
+                    }
+
+                    headerCols[handleIndex].Width = new GridLength(newLeft);
+                    headerCols[handleIndex + 1].Width = new GridLength(newRight);
+                    ladderCols[handleIndex].Width = new GridLength(newLeft);
+                    ladderCols[handleIndex + 1].Width = new GridLength(newRight);
+                    e.Handled = true;
+                };
+
+                handle.MouseLeftButtonUp += (s, e) =>
+                {
+                    dragging = false;
+                    ((Border)s).ReleaseMouseCapture();
+                    e.Handled = true;
+                };
+
+                Grid.SetColumn(handle, h);
+                Panel.SetZIndex(handle, 1000);
+                columnHeader.Children.Add(handle);
+            }
+
+            // V0.9.9.36 - linhas verticais entre VENDA | PREÇO | COMPRA | VOLUME | DELTA.
+            for (int sep = 0; sep < 4; sep++)
+            {
+                Border verticalSeparator = new Border
+                {
+                    Width = 1,
+                    Background = new SolidColorBrush(Color.FromRgb(105, 105, 105)),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    IsHitTestVisible = false
+                };
+                Grid.SetColumn(verticalSeparator, sep);
+                Grid.SetRowSpan(verticalSeparator, LadderRows);
+                Panel.SetZIndex(verticalSeparator, 900);
+                ladder.Children.Add(verticalSeparator);
+            }
+
+            // Dimensionador externo na borda direita do DELTA.
+            // Ele altera apenas a largura do DELTA e a largura da janela.
+            Border deltaOuterHandle = new Border
+            {
+                Width = 7,
+                Background = new SolidColorBrush(Color.FromArgb(150, 105, 105, 105)),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Cursor = Cursors.SizeWE
+            };
+
+            bool deltaOuterDragging = false;
+            double deltaOuterStartScreenX = 0;
+            double deltaOuterStartWidth = 0;
+
+            deltaOuterHandle.MouseLeftButtonDown += (s, e) =>
+            {
+                deltaOuterDragging = true;
+                deltaOuterStartScreenX = e.GetPosition(columnHeader).X;
+                deltaOuterStartWidth = headerDeltaCol.ActualWidth;
+                ((Border)s).CaptureMouse();
+                e.Handled = true;
+            };
+
+            deltaOuterHandle.MouseMove += (s, e) =>
+            {
+                if (!deltaOuterDragging || e.LeftButton != MouseButtonState.Pressed)
+                    return;
+
+                double dx = e.GetPosition(columnHeader).X - deltaOuterStartScreenX;
+                double newDeltaWidth = Math.Max(60, deltaOuterStartWidth + dx);
+                headerDeltaCol.Width = new GridLength(newDeltaWidth);
+                ladderDeltaCol.Width = new GridLength(newDeltaWidth);
+
+                e.Handled = true;
+            };
+
+            deltaOuterHandle.MouseLeftButtonUp += (s, e) =>
+            {
+                deltaOuterDragging = false;
+                ((Border)s).ReleaseMouseCapture();
+                e.Handled = true;
+            };
+
+            Grid.SetColumn(deltaOuterHandle, 4);
+            Panel.SetZIndex(deltaOuterHandle, 1100);
+            columnHeader.Children.Add(deltaOuterHandle);
 
             bidCells = new TextBlock[LadderRows];
             priceCells = new TextBlock[LadderRows];
@@ -415,12 +597,19 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             volumeBorders = new Border[LadderRows];
             volumeGrids = new Grid[LadderRows];
             volumeBars = new Border[LadderRows];
+            deltaCells = new TextBlock[LadderRows];
+            deltaNegativeCells = new TextBlock[LadderRows];
+            deltaPositiveCells = new TextBlock[LadderRows];
+            deltaBorders = new Border[LadderRows];
+            deltaGrids = new Grid[LadderRows];
+            deltaPositiveBars = new Border[LadderRows];
+            deltaNegativeBars = new Border[LadderRows];
 
             for (int i = 0; i < LadderRows; i++)
             {
                 ladder.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-                bidCells[i] = AddLadderCell(ladder, "", i, 0,
+                bidCells[i] = AddLadderCell(ladder, "", i, 2,
                     new SolidColorBrush(Color.FromRgb(25, 92, 48)), out bidBorders[i]);
 
                 priceCells[i] = AddLadderCell(ladder, "--", i, 1,
@@ -433,7 +622,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 priceCells[i].MouseRightButtonDown +=
                     (s, e) => PreviewOrderAtRow(previewRow, "VENDA");
 
-                askCells[i] = AddLadderCell(ladder, "", i, 2,
+                askCells[i] = AddLadderCell(ladder, "", i, 0,
                     new SolidColorBrush(Color.FromRgb(55, 55, 58)), out askBorders[i]);
 
                 // Barra proporcional COMPRA: cresce da esquerda para a direita.
@@ -478,6 +667,74 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 volumeGrids[i].Children.Add(volumeBars[i]);
                 volumeGrids[i].Children.Add(volumeCells[i]);
                 volumeBorders[i].Child = volumeGrids[i];
+
+                deltaBorders[i] = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(36, 36, 39)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(52, 52, 55)),
+                    BorderThickness = new Thickness(0, 0, 1, 1)
+                };
+                Grid.SetRow(deltaBorders[i], i);
+                Grid.SetColumn(deltaBorders[i], 4);
+                ladder.Children.Add(deltaBorders[i]);
+
+                deltaGrids[i] = new Grid { ClipToBounds = true };
+                deltaGrids[i].ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                deltaGrids[i].ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                deltaNegativeBars[i] = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(125, 22, 25)),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Width = 0
+                };
+                Grid.SetColumn(deltaNegativeBars[i], 0);
+
+                deltaPositiveBars[i] = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(20, 105, 35)),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Width = 0
+                };
+                Grid.SetColumn(deltaPositiveBars[i], 1);
+
+                // Mantém deltaCells para compatibilidade com a rotina de limpeza,
+                // mas a exibição passa a usar textos espelhados em torno do zero.
+                deltaCells[i] = new TextBlock { Text = "", Visibility = Visibility.Collapsed };
+
+                deltaNegativeCells[i] = new TextBlock
+                {
+                    Text = "",
+                    Foreground = Brushes.WhiteSmoke,
+                    FontSize = 11,
+                    FontWeight = FontWeights.Bold,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextAlignment = TextAlignment.Right,
+                    Margin = new Thickness(2, 0, 4, 0)
+                };
+                Grid.SetColumn(deltaNegativeCells[i], 0);
+
+                deltaPositiveCells[i] = new TextBlock
+                {
+                    Text = "",
+                    Foreground = Brushes.WhiteSmoke,
+                    FontSize = 11,
+                    FontWeight = FontWeights.Bold,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextAlignment = TextAlignment.Left,
+                    Margin = new Thickness(4, 0, 2, 0)
+                };
+                Grid.SetColumn(deltaPositiveCells[i], 1);
+
+                deltaGrids[i].Children.Add(deltaNegativeBars[i]);
+                deltaGrids[i].Children.Add(deltaPositiveBars[i]);
+                deltaGrids[i].Children.Add(deltaNegativeCells[i]);
+                deltaGrids[i].Children.Add(deltaPositiveCells[i]);
+                deltaBorders[i].Child = deltaGrids[i];
             }
 
             Grid.SetRow(ladder, 4);
@@ -494,7 +751,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.23 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
+                Text = "V0.9.9.38 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -504,6 +761,18 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             StackPanel statusPanel = new StackPanel();
 
             statusPanel.Children.Add(connectionStatus);
+
+            aggressionBalanceStatus = new TextBlock
+            {
+                Text = "SALDO AGRESSÃO: 0",
+                Foreground = Brushes.WhiteSmoke,
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(4, 4, 4, 0)
+            };
+            statusPanel.Children.Add(aggressionBalanceStatus);
 
             profileStatus = new TextBlock
             {
@@ -698,7 +967,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.23 ATM • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.38 ATM • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -740,7 +1009,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
                 if (selectedAtm == null)
                 {
-                    connectionStatus.Text = "V0.9.9.23 ATM • SELECIONE UMA ESTRATÉGIA ATM";
+                    connectionStatus.Text = "V0.9.9.38 ATM • SELECIONE UMA ESTRATÉGIA ATM";
                     return;
                 }
 
@@ -765,7 +1034,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.23 ATM • ENVIADA: " + previewOrderSide +
+                    "V0.9.9.38 ATM • ENVIADA: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • Sim101";
@@ -774,7 +1043,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.23 ATM • ERRO AO ENVIAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.38 ATM • ERRO AO ENVIAR: " + ex.Message;
             }
         }
 
@@ -784,13 +1053,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.23 ATM • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.38 ATM • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.9.23 ATM • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.38 ATM • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -800,12 +1069,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.23 ATM • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.38 ATM • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.23 ATM • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.38 ATM • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -891,7 +1160,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.23 ATM • STOP " +
+                "V0.9.9.38 ATM • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -952,8 +1221,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.23 ATM • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.23 ATM • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.38 ATM • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.38 ATM • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -962,7 +1231,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.23 ATM • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.38 ATM • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1023,7 +1292,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.23 ATM • ORDEM: " + statePt +
+                    "V0.9.9.38 ATM • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1063,7 +1332,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.23 ATM • " + previewOrderSide +
+                "V0.9.9.38 ATM • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1116,11 +1385,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.23 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.38 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.23 ATM • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
+            connectionStatus.Text = "V0.9.9.38 ATM • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1584,7 +1853,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.23 ATM • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.38 ATM • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1647,11 +1916,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.23 ATM • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.38 ATM • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.23 ATM • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.38 ATM • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
@@ -1666,6 +1935,35 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             long maxBuyVisible = 0;
             long maxSellVisible = 0;
+            long maxAbsDeltaVisible = 1;
+
+            // V0.9.9.25 - saldo acumulado da agressão da sessão/local atual.
+            long totalBuyAggression = 0;
+            long totalSellAggression = 0;
+
+            foreach (KeyValuePair<double, long> kv in buyFlow)
+                totalBuyAggression += kv.Value;
+
+            foreach (KeyValuePair<double, long> kv in sellFlow)
+                totalSellAggression += kv.Value;
+
+            long aggressionBalance = totalBuyAggression - totalSellAggression;
+
+            if (aggressionBalanceStatus != null)
+            {
+                aggressionBalanceStatus.Text =
+                    "SALDO AGRESSÃO: " +
+                    (aggressionBalance > 0 ? "+" : "") +
+                    aggressionBalance.ToString() +
+                    "   •   C: " + totalBuyAggression.ToString() +
+                    "   •   V: " + totalSellAggression.ToString();
+
+                aggressionBalanceStatus.Foreground = aggressionBalance > 0
+                    ? new SolidColorBrush(Color.FromRgb(90, 220, 120))
+                    : (aggressionBalance < 0
+                        ? new SolidColorBrush(Color.FromRgb(240, 105, 105))
+                        : Brushes.WhiteSmoke);
+            }
 
             for (int scan = 0; scan < LadderRows; scan++)
             {
@@ -1679,6 +1977,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 if (bv > maxBuyVisible) maxBuyVisible = bv;
                 if (sv > maxSellVisible) maxSellVisible = sv;
+                long scanAbsDelta = Math.Abs(bv - sv);
+                if (scanAbsDelta > maxAbsDeltaVisible)
+                    maxAbsDeltaVisible = scanAbsDelta;
             }
 
             for (int row = 0; row < LadderRows; row++)
@@ -1702,6 +2003,25 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 if (sellVolume > 0)
                     askCells[row].Text = sellVolume.ToString();
+
+                long delta = buyVolume - sellVolume;
+                if (deltaCells != null && deltaCells[row] != null)
+                {
+                    double deltaRatio = Math.Min(1.0,
+                        Math.Abs((double)delta) / Math.Max(1L, maxAbsDeltaVisible));
+                    double halfWidth = deltaBorders[row].ActualWidth * 0.5;
+                    double deltaBarWidth = Math.Max(0, halfWidth * deltaRatio);
+
+                    deltaNegativeBars[row].Width = delta < 0 ? deltaBarWidth : 0;
+                    deltaPositiveBars[row].Width = delta > 0 ? deltaBarWidth : 0;
+
+                    deltaNegativeCells[row].Text = delta < 0 ? delta.ToString() : "";
+                    deltaPositiveCells[row].Text = delta > 0 ? delta.ToString() : "";
+
+                    // Zero fica junto ao eixo central, no lado direito.
+                    if (delta == 0)
+                        deltaPositiveCells[row].Text = "0";
+                }
 
                 // Largura relativa ao maior volume visível de cada lado.
                 double buyRatio = maxBuyVisible > 0 ? Math.Min(1.0, (double)buyVolume / maxBuyVisible) : 0.0;
@@ -1762,6 +2082,10 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
                 else
                 {
+                    // V0.9.9.26 - MOMENTO por nível.
+                    // Usa exatamente o mesmo delta já validado na coluna DELTA.
+                    // Verde discreto = pressão compradora; vermelho discreto =
+                    // pressão vendedora. Delta zero mantém a cor neutra.
                     bidBorders[row].Background = new SolidColorBrush(Color.FromRgb(55, 55, 58));
                     priceBorders[row].Background = priceBackground;
                     askBorders[row].Background = new SolidColorBrush(Color.FromRgb(55, 55, 58));
@@ -1809,6 +2133,19 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     volumeCells[i].Text = "";
                 if (volumeBars != null && volumeBars[i] != null)
                     volumeBars[i].Width = 0;
+                if (deltaCells != null && deltaCells[i] != null)
+                {
+                    deltaCells[i].Text = "";
+                    deltaCells[i].Foreground = Brushes.WhiteSmoke;
+                    if (deltaNegativeBars != null && deltaNegativeBars[i] != null)
+                        deltaNegativeBars[i].Width = 0;
+                    if (deltaPositiveBars != null && deltaPositiveBars[i] != null)
+                        deltaPositiveBars[i].Width = 0;
+                    if (deltaNegativeCells != null && deltaNegativeCells[i] != null)
+                        deltaNegativeCells[i].Text = "";
+                    if (deltaPositiveCells != null && deltaPositiveCells[i] != null)
+                        deltaPositiveCells[i].Text = "";
+                }
 
                 bidBorders[i].Background = new SolidColorBrush(Color.FromRgb(55, 55, 58));
                 priceBorders[i].Background = new SolidColorBrush(Color.FromRgb(62, 62, 65));
