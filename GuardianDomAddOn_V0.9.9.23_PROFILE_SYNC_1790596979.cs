@@ -130,6 +130,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
         private Instrument currentInstrument;
         private MarketData marketData;
+        private BarsRequest historicalProfileRequest;
         private DispatcherTimer depthRefreshTimer;
 
         // Fluxo negociado por preço. Não usa SuperDom.Rows nem MarketDepth.
@@ -148,6 +149,22 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private double profilePoc = double.NaN;
         private double profileVah = double.NaN;
         private double profileVal = double.NaN;
+
+        // V0.9.9.23 - diagnóstico do histórico recebido pelo BarsRequest.
+        private DateTime profileRequestedFrom = DateTime.MinValue;
+        private DateTime profileRequestedTo = DateTime.MinValue;
+        private DateTime profileFirstBarTime = DateTime.MinValue;
+        private DateTime profileLastBarTime = DateTime.MinValue;
+        private double profileHistoryMinPrice = double.NaN;
+        private double profileHistoryMaxPrice = double.NaN;
+        private long profileHistoryTotalVolume = 0;
+        private int profileHistoryLevels = 0;
+        private int profileHistoryBars = 0;
+
+        // V0.9.9.23 - negócios ao vivo recebidos enquanto o histórico está carregando.
+        private bool historicalProfileLoading = false;
+        private readonly Dictionary<double, long> liveVolumeDuringHistoryLoad =
+            new Dictionary<double, long>();
 
         // V0.9.0: apenas pré-visualização local; nenhuma ordem é enviada.
         private double previewOrderPrice = double.NaN;
@@ -477,7 +494,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.3 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
+                Text = "V0.9.9.23 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -681,7 +698,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.3 ATM • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.23 ATM • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -723,7 +740,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
                 if (selectedAtm == null)
                 {
-                    connectionStatus.Text = "V0.9.9.3 ATM • SELECIONE UMA ESTRATÉGIA ATM";
+                    connectionStatus.Text = "V0.9.9.23 ATM • SELECIONE UMA ESTRATÉGIA ATM";
                     return;
                 }
 
@@ -748,7 +765,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.3 ATM • ENVIADA: " + previewOrderSide +
+                    "V0.9.9.23 ATM • ENVIADA: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • Sim101";
@@ -757,7 +774,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.3 ATM • ERRO AO ENVIAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.23 ATM • ERRO AO ENVIAR: " + ex.Message;
             }
         }
 
@@ -767,13 +784,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.3 ATM • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.23 ATM • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.9.3 ATM • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.23 ATM • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -783,12 +800,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.3 ATM • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.23 ATM • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.3 ATM • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.23 ATM • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -874,7 +891,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.3 ATM • STOP " +
+                "V0.9.9.23 ATM • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -935,8 +952,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.3 ATM • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.3 ATM • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.23 ATM • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.23 ATM • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -945,7 +962,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.3 ATM • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.23 ATM • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1006,7 +1023,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.3 ATM • ORDEM: " + statePt +
+                    "V0.9.9.23 ATM • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1046,7 +1063,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.3 ATM • " + previewOrderSide +
+                "V0.9.9.23 ATM • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1084,6 +1101,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             lastAggressorSide = 0;
             flowTrades = 0;
             dailyVolume.Clear();
+            historicalProfileLoading = false;
+            liveVolumeDuringHistoryLoad.Clear();
             lastVolumeBridgeVersion = -1;
             maxDailyVolume = 0;
             profilePoc = double.NaN;
@@ -1097,11 +1116,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.3 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.23 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.3 ATM • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
+            connectionStatus.Text = "V0.9.9.23 ATM • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1115,7 +1134,127 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             if (marketData.Last != null)
                 lastPrice = marketData.Last.Price;
 
+            LoadHistoricalProfile();
             UpdateDisplay();
+        }
+
+        // V0.9.9.22: carrega o historico de negocios de 1 tick do dia.
+        // Isso permite iniciar POC/VAH/VAL sem esperar a janela acumular do zero.
+        private void LoadHistoricalProfile()
+        {
+            if (currentInstrument == null)
+                return;
+
+            if (historicalProfileRequest != null)
+            {
+                historicalProfileRequest.Dispose();
+                historicalProfileRequest = null;
+            }
+
+            // V0.9.9.22: perfil da sessão operacional 19:00 -> agora.
+            // Antes das 19:00, a sessão começou às 19:00 do dia anterior.
+            // A partir das 19:00, começa às 19:00 do próprio dia.
+            DateTime now = DateTime.Now;
+            DateTime sessionStart = now.TimeOfDay >= new TimeSpan(19, 0, 0)
+                ? now.Date.AddHours(19)
+                : now.Date.AddDays(-1).AddHours(19);
+
+            profileRequestedFrom = sessionStart;
+            profileRequestedTo = now;
+
+            historicalProfileLoading = true;
+            liveVolumeDuringHistoryLoad.Clear();
+
+            historicalProfileRequest = new BarsRequest(currentInstrument, sessionStart, now);
+            historicalProfileRequest.BarsPeriod = new BarsPeriod
+            {
+                BarsPeriodType = BarsPeriodType.Tick,
+                Value = 1
+            };
+
+            BarsRequest request = historicalProfileRequest;
+
+            request.Request(new Action<BarsRequest, ErrorCode, string>(
+                (barsRequest, errorCode, errorMessage) =>
+                {
+                    if (errorCode != ErrorCode.NoError)
+                    {
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            historicalProfileLoading = false;
+                            liveVolumeDuringHistoryLoad.Clear();
+                        }));
+                        return;
+                    }
+
+                    Dictionary<double, long> history = new Dictionary<double, long>();
+                    DateTime firstBar = DateTime.MinValue;
+                    DateTime lastBar = DateTime.MinValue;
+                    double minHistoryPrice = double.MaxValue;
+                    double maxHistoryPrice = double.MinValue;
+                    long historyTotalVolume = 0;
+
+                    for (int i = 0; i < barsRequest.Bars.Count; i++)
+                    {
+                        DateTime barTime = barsRequest.Bars.GetTime(i);
+                        if (firstBar == DateTime.MinValue || barTime < firstBar)
+                            firstBar = barTime;
+                        if (lastBar == DateTime.MinValue || barTime > lastBar)
+                            lastBar = barTime;
+
+                        double p = currentInstrument.MasterInstrument.RoundToTickSize(
+                            barsRequest.Bars.GetClose(i));
+                        long v = barsRequest.Bars.GetVolume(i);
+
+                        if (p <= 0 || v <= 0)
+                            continue;
+
+                        if (p < minHistoryPrice) minHistoryPrice = p;
+                        if (p > maxHistoryPrice) maxHistoryPrice = p;
+                        historyTotalVolume += v;
+
+                        long existing;
+                        history.TryGetValue(p, out existing);
+                        history[p] = existing + v;
+                    }
+
+                    int historyBarsCount = barsRequest.Bars.Count;
+                    int historyLevelsCount = history.Count;
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (historicalProfileRequest != request || currentInstrument == null)
+                            return;
+
+                        dailyVolume.Clear();
+                        foreach (KeyValuePair<double, long> kv in history)
+                            dailyVolume[kv.Key] = kv.Value;
+
+                        // Reaplica somente os negócios que chegaram ao vivo
+                        // durante o carregamento do BarsRequest.
+                        foreach (KeyValuePair<double, long> kv in liveVolumeDuringHistoryLoad)
+                        {
+                            long existing;
+                            dailyVolume.TryGetValue(kv.Key, out existing);
+                            dailyVolume[kv.Key] = existing + kv.Value;
+                        }
+
+                        historicalProfileLoading = false;
+                        liveVolumeDuringHistoryLoad.Clear();
+
+                        profileFirstBarTime = firstBar;
+                        profileLastBarTime = lastBar;
+                        profileHistoryMinPrice = minHistoryPrice == double.MaxValue ? double.NaN : minHistoryPrice;
+                        profileHistoryMaxPrice = maxHistoryPrice == double.MinValue ? double.NaN : maxHistoryPrice;
+                        profileHistoryTotalVolume = historyTotalVolume;
+                        profileHistoryLevels = historyLevelsCount;
+                        profileHistoryBars = historyBarsCount;
+
+                        lastVolumeBridgeVersion = -2;
+                        RecalculateDailyProfile();
+                        UpdateDisplay();
+                    }));
+                }));
         }
 
         private void OnMarketData(object sender, MarketDataEventArgs e)
@@ -1195,6 +1334,24 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             target.TryGetValue(levelPrice, out current);
             target[levelPrice] = current + volume;
 
+            // V0.9.9.18: perfil local ao vivo por preço.
+            long localDaily;
+            dailyVolume.TryGetValue(levelPrice, out localDaily);
+            dailyVolume[levelPrice] = localDaily + volume;
+
+            // Enquanto o histórico está sendo carregado, guarda também estes
+            // negócios num buffer. Depois o histórico substitui a base e o
+            // buffer é reaplicado, evitando perder negócios ocorridos durante
+            // o request.
+            if (historicalProfileLoading)
+            {
+                long buffered;
+                liveVolumeDuringHistoryLoad.TryGetValue(levelPrice, out buffered);
+                liveVolumeDuringHistoryLoad[levelPrice] = buffered + volume;
+            }
+
+            RecalculateDailyProfile();
+
             lastAggressorSide = side;
             flowTrades++;
         }
@@ -1211,8 +1368,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Dictionary<double, long> snapshot =
                 GuardianVolumeBridge.Snapshot(currentInstrument.FullName);
 
+            // Bridge externo continua tendo prioridade. Sem ele, mantém o
+            // perfil local acumulado pelos negócios recebidos nesta janela.
             if (snapshot.Count == 0)
+            {
+                if (dailyVolume.Count > 0)
+                    RecalculateDailyProfile();
                 return;
+            }
 
             dailyVolume.Clear();
             foreach (KeyValuePair<double, long> kv in snapshot)
@@ -1234,54 +1397,112 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             profileVah = double.NaN;
             profileVal = double.NaN;
 
-            if (dailyVolume.Count == 0)
+            if (dailyVolume.Count == 0 || currentInstrument == null)
                 return;
 
+            double tick = currentInstrument.MasterInstrument.TickSize;
+            if (tick <= 0)
+                return;
+
+            // V0.9.9.22:
+            // Normaliza o perfil para uma escada CONTÍNUA de ticks.
+            // A versão anterior usava apenas preços existentes no Dictionary.
+            // Quando havia níveis ausentes, VAH/VAL podiam saltar por grandes
+            // regiões sem volume e produzir uma área artificialmente ampla.
+            double minPrice = double.MaxValue;
+            double maxPrice = double.MinValue;
             long total = 0;
+
             foreach (KeyValuePair<double, long> kv in dailyVolume)
             {
+                if (kv.Value <= 0)
+                    continue;
+
+                double p = currentInstrument.MasterInstrument.RoundToTickSize(kv.Key);
+                if (p < minPrice) minPrice = p;
+                if (p > maxPrice) maxPrice = p;
                 total += kv.Value;
-                if (kv.Value > maxDailyVolume)
+            }
+
+            if (total <= 0 || minPrice == double.MaxValue || maxPrice == double.MinValue)
+                return;
+
+            int levels = (int)Math.Round((maxPrice - minPrice) / tick) + 1;
+            if (levels <= 0 || levels > 200000)
+                return;
+
+            List<double> prices = new List<double>(levels);
+            List<long> volumes = new List<long>(levels);
+
+            int pocIndex = -1;
+            long pocVolume = -1;
+
+            for (int i = 0; i < levels; i++)
+            {
+                double p = currentInstrument.MasterInstrument.RoundToTickSize(minPrice + i * tick);
+                long v;
+                if (!dailyVolume.TryGetValue(p, out v))
+                    v = 0;
+
+                prices.Add(p);
+                volumes.Add(v);
+
+                // Em empate de volume, escolhe o nível mais próximo do LAST.
+                if (v > pocVolume ||
+                    (v == pocVolume && pocIndex >= 0 &&
+                     Math.Abs(p - lastPrice) < Math.Abs(prices[pocIndex] - lastPrice)))
                 {
-                    maxDailyVolume = kv.Value;
-                    profilePoc = kv.Key;
+                    pocVolume = v;
+                    pocIndex = i;
                 }
             }
 
-            if (total <= 0 || double.IsNaN(profilePoc))
+            if (pocIndex < 0 || pocVolume <= 0)
                 return;
 
-            List<double> prices = new List<double>(dailyVolume.Keys);
-            prices.Sort();
-
-            int pocIndex = prices.FindIndex(p =>
-                Math.Abs(p - profilePoc) < currentInstrument.MasterInstrument.TickSize * 0.5);
-
-            if (pocIndex < 0)
-                return;
+            profilePoc = prices[pocIndex];
+            maxDailyVolume = pocVolume;
 
             long target = (long)Math.Ceiling(total * 0.70);
-            long accumulated = dailyVolume[prices[pocIndex]];
+            long accumulated = volumes[pocIndex];
             int low = pocIndex;
             int high = pocIndex;
 
+            // Expansão contígua a partir do POC.
+            // Em cada passo compara o próximo tick acima/abaixo e inclui
+            // o lado de maior volume. Em empate, inclui os dois lados.
             while (accumulated < target && (low > 0 || high < prices.Count - 1))
             {
-                long below = low > 0 ? dailyVolume[prices[low - 1]] : -1;
-                long above = high < prices.Count - 1 ? dailyVolume[prices[high + 1]] : -1;
+                long below = low > 0 ? volumes[low - 1] : -1;
+                long above = high < prices.Count - 1 ? volumes[high + 1] : -1;
 
-                if (above >= below && above >= 0)
+                if (above < 0 && below < 0)
+                    break;
+
+                if (above > below)
                 {
                     high++;
-                    accumulated += dailyVolume[prices[high]];
+                    accumulated += volumes[high];
                 }
-                else if (below >= 0)
+                else if (below > above)
                 {
                     low--;
-                    accumulated += dailyVolume[prices[low]];
+                    accumulated += volumes[low];
                 }
                 else
-                    break;
+                {
+                    if (low > 0)
+                    {
+                        low--;
+                        accumulated += volumes[low];
+                    }
+
+                    if (accumulated < target && high < prices.Count - 1)
+                    {
+                        high++;
+                        accumulated += volumes[high];
+                    }
+                }
             }
 
             profileVal = prices[low];
@@ -1363,7 +1584,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.3 ATM • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.23 ATM • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1426,12 +1647,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.3 ATM • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.23 ATM • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.3 ATM • NEGÓCIOS: " + flowTrades.ToString()
-                + " • PERFIL: " + (dailyVolume.Count > 0 ? "OK" : "AGUARDANDO VOLUMEPRO")
+            connectionStatus.Text = "V0.9.9.23 ATM • NEGÓCIOS: " + flowTrades.ToString()
+                + " • PERFIL: " + (dailyVolume.Count > 0
+                    ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
+                        : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
+                    : "CARREGANDO HISTÓRICO")
                 + (ladderManualNavigation ? " • LADDER: MANUAL " + (ladderOffsetTicks >= 0 ? "+" : "") + ladderOffsetTicks.ToString() + "t" : " • LADDER: AUTO")
                 + " • ENVIO SOMENTE POR BOTÃO / Sim101";
 
@@ -1603,6 +1827,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 marketData.Update -= OnMarketData;
                 marketData = null;
+            }
+
+            if (historicalProfileRequest != null)
+            {
+                historicalProfileRequest.Dispose();
+                historicalProfileRequest = null;
             }
 
             buyFlow.Clear();
