@@ -232,6 +232,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private int ladderOffsetTicks = 0;
         private bool ladderManualNavigation = false;
 
+        // V0.9.9.43 - centro visual persistente da ladder.
+        // Em AUTO, só é deslocado quando o mercado chega perto das bordas.
+        private double ladderDisplayCenter = double.NaN;
+        private const int AutoCenterEdgeRows = 5;
+
         public GuardianDomWindow()
         {
             // Estrutura da janela baseada diretamente na GuardianWindow original.
@@ -766,7 +771,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.42 PERF • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
+                Text = "V0.9.9.43 SMART • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -843,6 +848,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 ladderOffsetTicks = 0;
                 ladderManualNavigation = false;
+                ladderDisplayCenter = double.NaN; // força centralização imediata
                 UpdateDisplay();
             };
 
@@ -982,7 +988,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.42 PERF • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.43 SMART • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1024,7 +1030,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
                 if (selectedAtm == null)
                 {
-                    connectionStatus.Text = "V0.9.9.42 PERF • SELECIONE UMA ESTRATÉGIA ATM";
+                    connectionStatus.Text = "V0.9.9.43 SMART • SELECIONE UMA ESTRATÉGIA ATM";
                     return;
                 }
 
@@ -1049,7 +1055,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.42 PERF • ENVIADA: " + previewOrderSide +
+                    "V0.9.9.43 SMART • ENVIADA: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • Sim101";
@@ -1058,7 +1064,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.42 PERF • ERRO AO ENVIAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.43 SMART • ERRO AO ENVIAR: " + ex.Message;
             }
         }
 
@@ -1068,13 +1074,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.42 PERF • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.43 SMART • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.9.42 PERF • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.43 SMART • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -1084,12 +1090,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.42 PERF • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.43 SMART • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.42 PERF • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.43 SMART • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1175,7 +1181,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.42 PERF • STOP " +
+                "V0.9.9.43 SMART • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1236,8 +1242,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.42 PERF • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.42 PERF • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.43 SMART • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.43 SMART • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1246,7 +1252,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.42 PERF • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.43 SMART • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1307,7 +1313,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.42 PERF • ORDEM: " + statePt +
+                    "V0.9.9.43 SMART • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1347,7 +1353,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.42 PERF • " + previewOrderSide +
+                "V0.9.9.43 SMART • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1381,6 +1387,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             currentInstrument = newInstrument;
             ladderOffsetTicks = 0;
             ladderManualNavigation = false;
+            ladderDisplayCenter = double.NaN;
             lastPrice = 0;
             bidPrice = 0;
             askPrice = 0;
@@ -1405,11 +1412,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.42 PERF • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.43 SMART • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.42 PERF • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
+            connectionStatus.Text = "V0.9.9.43 SMART • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1874,7 +1881,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.42 PERF • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.43 SMART • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1937,11 +1944,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.42 PERF • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.43 SMART • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.42 PERF • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.43 SMART • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
@@ -1951,8 +1958,33 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             double tickSize = currentInstrument.MasterInstrument.TickSize;
             double marketCenter = currentInstrument.MasterInstrument.RoundToTickSize(anchor);
-            double center = currentInstrument.MasterInstrument.RoundToTickSize(
-                marketCenter + ladderOffsetTicks * tickSize);
+            double center;
+
+            if (ladderManualNavigation)
+            {
+                // Manual continua exatamente como antes: deslocamento relativo ao mercado.
+                center = currentInstrument.MasterInstrument.RoundToTickSize(
+                    marketCenter + ladderOffsetTicks * tickSize);
+            }
+            else
+            {
+                // V0.9.9.43 SMART AUTO-CENTER:
+                // mantém a ladder parada enquanto o preço permanece na zona segura.
+                // Só recentraliza quando faltarem 5 níveis para uma das bordas.
+                if (double.IsNaN(ladderDisplayCenter))
+                {
+                    ladderDisplayCenter = marketCenter;
+                }
+                else
+                {
+                    double distanceTicks = Math.Abs((marketCenter - ladderDisplayCenter) / tickSize);
+                    int triggerTicks = CenterRow - AutoCenterEdgeRows; // 21 linhas: dispara a 5 ticks do centro
+                    if (distanceTicks >= triggerTicks)
+                        ladderDisplayCenter = marketCenter;
+                }
+
+                center = currentInstrument.MasterInstrument.RoundToTickSize(ladderDisplayCenter);
+            }
 
             long maxBuyVisible = 0;
             long maxSellVisible = 0;
