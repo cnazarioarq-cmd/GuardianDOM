@@ -419,6 +419,21 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Panel.SetZIndex(headerBottomSeparator, 850);
             columnHeader.Children.Add(headerBottomSeparator);
 
+            // V0.9.9.42 - linha superior no MESMO Grid do cabeçalho.
+            // Não envolve/reinsere columnHeader no layout principal.
+            Border headerTopSeparator = new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Color.FromRgb(105, 105, 105)),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Top,
+                IsHitTestVisible = false
+            };
+            Grid.SetColumn(headerTopSeparator, 0);
+            Grid.SetColumnSpan(headerTopSeparator, 5);
+            Panel.SetZIndex(headerTopSeparator, 850);
+            columnHeader.Children.Add(headerTopSeparator);
+
             Grid.SetRow(columnHeader, 3);
             root.Children.Add(columnHeader);
 
@@ -751,7 +766,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.40 PERF • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
+                Text = "V0.9.9.42 PERF • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -967,7 +982,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.40 PERF • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.42 PERF • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1009,7 +1024,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
                 if (selectedAtm == null)
                 {
-                    connectionStatus.Text = "V0.9.9.40 PERF • SELECIONE UMA ESTRATÉGIA ATM";
+                    connectionStatus.Text = "V0.9.9.42 PERF • SELECIONE UMA ESTRATÉGIA ATM";
                     return;
                 }
 
@@ -1034,7 +1049,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.40 PERF • ENVIADA: " + previewOrderSide +
+                    "V0.9.9.42 PERF • ENVIADA: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • Sim101";
@@ -1043,7 +1058,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.40 PERF • ERRO AO ENVIAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.42 PERF • ERRO AO ENVIAR: " + ex.Message;
             }
         }
 
@@ -1053,13 +1068,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.40 PERF • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.42 PERF • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.9.40 PERF • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.42 PERF • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -1069,12 +1084,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.40 PERF • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.42 PERF • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.40 PERF • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.42 PERF • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1160,7 +1175,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.40 PERF • STOP " +
+                "V0.9.9.42 PERF • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1221,8 +1236,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.40 PERF • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.40 PERF • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.42 PERF • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.42 PERF • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1231,7 +1246,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.40 PERF • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.42 PERF • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1292,7 +1307,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.40 PERF • ORDEM: " + statePt +
+                    "V0.9.9.42 PERF • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1332,7 +1347,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.40 PERF • " + previewOrderSide +
+                "V0.9.9.42 PERF • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1390,11 +1405,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.40 PERF • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.42 PERF • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.40 PERF • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
+            connectionStatus.Text = "V0.9.9.42 PERF • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1859,7 +1874,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.40 PERF • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.42 PERF • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1922,11 +1937,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.40 PERF • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.42 PERF • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.40 PERF • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.42 PERF • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
