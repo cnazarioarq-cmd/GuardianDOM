@@ -771,7 +771,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.43 SMART • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
+                Text = "V0.9.9.44 QUOTES • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -988,7 +988,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.43 SMART • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.44 QUOTES • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1030,7 +1030,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
                 if (selectedAtm == null)
                 {
-                    connectionStatus.Text = "V0.9.9.43 SMART • SELECIONE UMA ESTRATÉGIA ATM";
+                    connectionStatus.Text = "V0.9.9.44 QUOTES • SELECIONE UMA ESTRATÉGIA ATM";
                     return;
                 }
 
@@ -1055,7 +1055,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.43 SMART • ENVIADA: " + previewOrderSide +
+                    "V0.9.9.44 QUOTES • ENVIADA: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • Sim101";
@@ -1064,7 +1064,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.43 SMART • ERRO AO ENVIAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.44 QUOTES • ERRO AO ENVIAR: " + ex.Message;
             }
         }
 
@@ -1074,13 +1074,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.43 SMART • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.44 QUOTES • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.9.43 SMART • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.44 QUOTES • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -1090,12 +1090,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.43 SMART • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.44 QUOTES • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.43 SMART • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.44 QUOTES • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1181,7 +1181,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.43 SMART • STOP " +
+                "V0.9.9.44 QUOTES • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1242,8 +1242,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.43 SMART • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.43 SMART • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.44 QUOTES • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.44 QUOTES • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1252,7 +1252,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.43 SMART • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.44 QUOTES • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1313,7 +1313,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.43 SMART • ORDEM: " + statePt +
+                    "V0.9.9.44 QUOTES • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1353,7 +1353,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.43 SMART • " + previewOrderSide +
+                "V0.9.9.44 QUOTES • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1412,11 +1412,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.43 SMART • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.44 QUOTES • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.43 SMART • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
+            connectionStatus.Text = "V0.9.9.44 QUOTES • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1881,7 +1881,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.43 SMART • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.44 QUOTES • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1944,11 +1944,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.43 SMART • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.44 QUOTES • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.43 SMART • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.44 QUOTES • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
@@ -2113,9 +2113,18 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 else
                     volumeBars[row].Background = normalVolumeColor;
 
-                // A linha do LAST ganha prioridade visual e atravessa BID + PREÇO + ASK.
+                // V0.9.9.44 - leitura BID / ASK / LAST dentro da ladder.
+                // LAST continua com prioridade máxima (amarelo).
+                // BID e ASK recebem apenas um realce discreto nas respectivas colunas,
+                // sem criar novos controles e sem alterar o throttle de atualização.
                 bool isLastRow = lastPrice > 0 &&
                     Math.Abs(levelPrice - currentInstrument.MasterInstrument.RoundToTickSize(lastPrice))
+                        < tickSize * 0.5;
+                bool isBidRow = bidPrice > 0 &&
+                    Math.Abs(levelPrice - currentInstrument.MasterInstrument.RoundToTickSize(bidPrice))
+                        < tickSize * 0.5;
+                bool isAskRow = askPrice > 0 &&
+                    Math.Abs(levelPrice - currentInstrument.MasterInstrument.RoundToTickSize(askPrice))
                         < tickSize * 0.5;
 
                 if (isLastRow)
@@ -2135,13 +2144,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
                 else
                 {
-                    // V0.9.9.26 - MOMENTO por nível.
-                    // Usa exatamente o mesmo delta já validado na coluna DELTA.
-                    // Verde discreto = pressão compradora; vermelho discreto =
-                    // pressão vendedora. Delta zero mantém a cor neutra.
-                    bidBorders[row].Background = new SolidColorBrush(Color.FromRgb(55, 55, 58));
+                    Brush neutralSide = new SolidColorBrush(Color.FromRgb(55, 55, 58));
+                    Brush bidMarker = new SolidColorBrush(Color.FromRgb(30, 73, 105));
+                    Brush askMarker = new SolidColorBrush(Color.FromRgb(105, 45, 45));
+
+                    bidBorders[row].Background = isBidRow ? bidMarker : neutralSide;
                     priceBorders[row].Background = priceBackground;
-                    askBorders[row].Background = new SolidColorBrush(Color.FromRgb(55, 55, 58));
+                    askBorders[row].Background = isAskRow ? askMarker : neutralSide;
 
                     bidCells[row].Foreground = Brushes.WhiteSmoke;
                     priceCells[row].Foreground = Brushes.WhiteSmoke;
