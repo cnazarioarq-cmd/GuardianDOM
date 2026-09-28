@@ -771,7 +771,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.44 QUOTES • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
+                Text = "V0.9.9.48 DYNAMIC DELTA HEAT • SELECIONE UM ATIVO • PRÉVIA LOCAL / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -873,7 +873,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             sendPreviewButton = new Button
             {
-                Content = "ENVIAR PRÉVIA — SOMENTE Sim101",
+                Content = "CONFIRMAR PRÉVIA — NÃO ENVIA ORDEM",
                 Height = 28,
                 Margin = new Thickness(8, 5, 8, 0),
                 IsEnabled = false
@@ -883,7 +883,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             cancelOrderButton = new Button
             {
-                Content = "CANCELAR ORDEM DO GUARDIANDOM",
+                Content = "CANCELAR — SEM ORDEM NA V0.9.9.45",
                 Height = 28,
                 Margin = new Thickness(8, 4, 8, 0),
                 IsEnabled = false
@@ -975,97 +975,42 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             bool ready = currentInstrument != null
                 && !double.IsNaN(previewOrderPrice)
                 && previewOrderQuantity > 0
-                && atmStrategySelector != null
-                && atmStrategySelector.SelectedAtmStrategy != null
                 && (previewOrderType == "LIMIT" || previewOrderType == "STOP MARKET");
 
             sendPreviewButton.IsEnabled = sim101 && ready;
         }
 
+        // V0.9.9.45 - confirmação 100% local da prévia.
+        // IMPORTANTE: esta rotina NÃO cria, NÃO submete e NÃO inicia qualquer ordem/ATM.
         private void SendPreviewButton_Click(object sender, RoutedEventArgs e)
         {
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.44 QUOTES • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (currentInstrument == null || double.IsNaN(previewOrderPrice) || previewOrderQuantity <= 0)
                 return;
 
-            OrderAction action = previewOrderSide == "COMPRA" ? OrderAction.Buy : OrderAction.SellShort;
-            OrderType type = previewOrderType == "STOP MARKET" ? OrderType.StopMarket : OrderType.Limit;
-            double limitPrice = type == OrderType.Limit ? previewOrderPrice : 0;
-            double stopPrice = type == OrderType.StopMarket ? previewOrderPrice : 0;
+            guardianOrderStatus = "PRÉVIA CONFIRMADA";
 
-            try
+            if (orderStateStatus != null)
             {
-                Order order = account.CreateOrder(
-                    currentInstrument,
-                    action,
-                    type,
-                    OrderEntry.Manual,
-                    TimeInForce.Day,
-                    previewOrderQuantity,
-                    limitPrice,
-                    stopPrice,
-                    string.Empty,
-                    "Entry",
-                    Core.Globals.MaxDate,
-                    null);
-
-                // Nova entrada: zera apenas as referências do bracket desta entrada.
-                guardianStopOrder = null;
-                guardianTargetOrder = null;
-                bracketSubmittedForEntry = false;
-                beMonitorActive = false;
-                be20Detected = false;
-                be1ChangeSent = false;
-                be40Detected = false;
-                beEntryFillPrice = double.NaN;
-                beEntryDirection = 0;
-
-                NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
-                if (selectedAtm == null)
-                {
-                    connectionStatus.Text = "V0.9.9.44 QUOTES • SELECIONE UMA ESTRATÉGIA ATM";
-                    return;
-                }
-
-                // StartAtmStrategy envia a entrada e, após o fill, deixa o ATM nativo
-                // administrar stop, alvo, breakeven e trailing do template escolhido.
-                NinjaTrader.NinjaScript.AtmStrategy.StartAtmStrategy(selectedAtm, order);
-                guardianSubmittedOrder = order;
-                guardianOrderStatus = "ENVIADA";
-                if (orderStateStatus != null)
-                    orderStateStatus.Text = "ORDEM: ENVIADA";
-
-                if (guardianOrderAccount != account)
-                {
-                    if (guardianOrderAccount != null)
-                        guardianOrderAccount.OrderUpdate -= GuardianOrderAccount_OrderUpdate;
-
-                    guardianOrderAccount = account;
-                    guardianOrderAccount.OrderUpdate += GuardianOrderAccount_OrderUpdate;
-                }
-
-                if (cancelOrderButton != null)
-                    cancelOrderButton.IsEnabled = true;
-
-                connectionStatus.Text =
-                    "V0.9.9.44 QUOTES • ENVIADA: " + previewOrderSide +
-                    " " + previewOrderQuantity + " @ " +
-                    currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
-                    " • " + previewOrderType + " • Sim101";
-
-                sendPreviewButton.IsEnabled = false;
+                orderStateStatus.Text = "PRÉVIA CONFIRMADA • NÃO ENVIADA";
+                orderStateStatus.Foreground = Brushes.Gold;
             }
-            catch (Exception ex)
-            {
-                connectionStatus.Text = "V0.9.9.44 QUOTES • ERRO AO ENVIAR: " + ex.Message;
-            }
+
+            connectionStatus.Text =
+                "V0.9.9.48 DYNAMIC DELTA HEAT • CONFIRMADA: " + previewOrderSide +
+                " " + previewOrderQuantity + " @ " +
+                currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
+                " • " + previewOrderType + " • NENHUMA ORDEM ENVIADA";
+
+            // Mantém a seleção ativa para permitir revisar/alterar o nível.
+            UpdateSendButtonState();
         }
 
         private void CancelOrderButton_Click(object sender, RoutedEventArgs e)
@@ -1074,13 +1019,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.44 QUOTES • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.9.44 QUOTES • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -1090,12 +1035,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.44 QUOTES • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.44 QUOTES • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1181,7 +1126,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.44 QUOTES • STOP " +
+                "V0.9.9.48 DYNAMIC DELTA HEAT • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1242,8 +1187,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.44 QUOTES • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.44 QUOTES • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.48 DYNAMIC DELTA HEAT • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.48 DYNAMIC DELTA HEAT • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1252,7 +1197,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.44 QUOTES • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1313,7 +1258,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.44 QUOTES • ORDEM: " + statePt +
+                    "V0.9.9.48 DYNAMIC DELTA HEAT • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1353,11 +1298,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.44 QUOTES • " + previewOrderSide +
+                "V0.9.9.48 DYNAMIC DELTA HEAT • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
-                " • PRÉVIA PRONTA • ENVIO SOMENTE POR BOTÃO / Sim101";
+                " • PRÉVIA PRONTA • CONFIRMAÇÃO LOCAL / Sim101";
         }
 
         private void OnDepthRefreshTimerTick(object sender, EventArgs e)
@@ -1412,11 +1357,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.44 QUOTES • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • SELECIONE UM ATIVO • PRÉVIA LOCAL / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.44 QUOTES • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
+            connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • CONECTANDO MARKET DATA • PRÉVIA LOCAL / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1881,7 +1826,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.44 QUOTES • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1944,11 +1889,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.44 QUOTES • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.44 QUOTES • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
@@ -1988,6 +1933,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             long maxBuyVisible = 0;
             long maxSellVisible = 0;
+            long maxDailyVisible = 0;
+            long minBuyVisible = long.MaxValue;
+            long minSellVisible = long.MaxValue;
+            long minDailyVisible = long.MaxValue;
+            long minPositiveDeltaVisible = long.MaxValue;
+            long maxPositiveDeltaVisible = 0;
+            long minNegativeAbsDeltaVisible = long.MaxValue;
+            long maxNegativeAbsDeltaVisible = 0;
             long maxAbsDeltaVisible = 1;
 
             // V0.9.9.25 - saldo acumulado da agressão da sessão/local atual.
@@ -2030,9 +1983,30 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 if (bv > maxBuyVisible) maxBuyVisible = bv;
                 if (sv > maxSellVisible) maxSellVisible = sv;
-                long scanAbsDelta = Math.Abs(bv - sv);
+                if (bv > 0 && bv < minBuyVisible) minBuyVisible = bv;
+                if (sv > 0 && sv < minSellVisible) minSellVisible = sv;
+
+                long dv;
+                dailyVolume.TryGetValue(scanPrice, out dv);
+                if (dv > maxDailyVisible) maxDailyVisible = dv;
+                if (dv > 0 && dv < minDailyVisible) minDailyVisible = dv;
+
+                long scanDelta = bv - sv;
+                long scanAbsDelta = Math.Abs(scanDelta);
                 if (scanAbsDelta > maxAbsDeltaVisible)
                     maxAbsDeltaVisible = scanAbsDelta;
+
+                if (scanDelta > 0)
+                {
+                    if (scanDelta > maxPositiveDeltaVisible) maxPositiveDeltaVisible = scanDelta;
+                    if (scanDelta < minPositiveDeltaVisible) minPositiveDeltaVisible = scanDelta;
+                }
+                else if (scanDelta < 0)
+                {
+                    long negAbs = Math.Abs(scanDelta);
+                    if (negAbs > maxNegativeAbsDeltaVisible) maxNegativeAbsDeltaVisible = negAbs;
+                    if (negAbs < minNegativeAbsDeltaVisible) minNegativeAbsDeltaVisible = negAbs;
+                }
             }
 
             for (int row = 0; row < LadderRows; row++)
@@ -2060,13 +2034,34 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 long delta = buyVolume - sellVolume;
                 if (deltaCells != null && deltaCells[row] != null)
                 {
-                    double deltaRatio = Math.Min(1.0,
-                        Math.Abs((double)delta) / Math.Max(1L, maxAbsDeltaVisible));
+                    double deltaRatio = 0.0;
+                    if (delta > 0)
+                    {
+                        long posMin = minPositiveDeltaVisible == long.MaxValue ? 0 : minPositiveDeltaVisible;
+                        long posRange = maxPositiveDeltaVisible - posMin;
+                        deltaRatio = posRange > 0
+                            ? Math.Max(0.0, Math.Min(1.0, (double)(delta - posMin) / posRange))
+                            : 1.0;
+                    }
+                    else if (delta < 0)
+                    {
+                        long negAbs = Math.Abs(delta);
+                        long negMin = minNegativeAbsDeltaVisible == long.MaxValue ? 0 : minNegativeAbsDeltaVisible;
+                        long negRange = maxNegativeAbsDeltaVisible - negMin;
+                        deltaRatio = negRange > 0
+                            ? Math.Max(0.0, Math.Min(1.0, (double)(negAbs - negMin) / negRange))
+                            : 1.0;
+                    }
+
                     double halfWidth = deltaBorders[row].ActualWidth * 0.5;
-                    double deltaBarWidth = Math.Max(0, halfWidth * deltaRatio);
+                    double deltaBarWidth = Math.Max(0, halfWidth * Math.Sqrt(deltaRatio));
 
                     deltaNegativeBars[row].Width = delta < 0 ? deltaBarWidth : 0;
                     deltaPositiveBars[row].Width = delta > 0 ? deltaBarWidth : 0;
+
+                    double deltaHeat = Math.Sqrt(deltaRatio);
+                    deltaNegativeBars[row].Opacity = delta < 0 ? 0.16 + (0.84 * deltaHeat) : 0.0;
+                    deltaPositiveBars[row].Opacity = delta > 0 ? 0.16 + (0.84 * deltaHeat) : 0.0;
 
                     deltaNegativeCells[row].Text = delta < 0 ? delta.ToString() : "";
                     deltaPositiveCells[row].Text = delta > 0 ? delta.ToString() : "";
@@ -2077,14 +2072,40 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 // Largura relativa ao maior volume visível de cada lado.
-                double buyRatio = maxBuyVisible > 0 ? Math.Min(1.0, (double)buyVolume / maxBuyVisible) : 0.0;
-                double sellRatio = maxSellVisible > 0 ? Math.Min(1.0, (double)sellVolume / maxSellVisible) : 0.0;
+                double buyRatio = 0.0;
+                if (buyVolume > 0)
+                {
+                    long buyMin = minBuyVisible == long.MaxValue ? 0 : minBuyVisible;
+                    long buyRange = maxBuyVisible - buyMin;
+                    buyRatio = buyRange > 0
+                        ? Math.Max(0.0, Math.Min(1.0, (double)(buyVolume - buyMin) / buyRange))
+                        : 1.0;
+                }
+
+                double sellRatio = 0.0;
+                if (sellVolume > 0)
+                {
+                    long sellMin = minSellVisible == long.MaxValue ? 0 : minSellVisible;
+                    long sellRange = maxSellVisible - sellMin;
+                    sellRatio = sellRange > 0
+                        ? Math.Max(0.0, Math.Min(1.0, (double)(sellVolume - sellMin) / sellRange))
+                        : 1.0;
+                }
 
                 double buyWidth = bidBorders[row].ActualWidth * buyRatio;
                 double sellWidth = askBorders[row].ActualWidth * sellRatio;
 
                 buyFlowBars[row].Width = Math.Max(0, buyWidth);
                 sellFlowBars[row].Width = Math.Max(0, sellWidth);
+
+                // V0.9.9.46 - HEAT INTENSITY.
+                // Além da largura proporcional, a intensidade também acompanha
+                // a força relativa do nível visível. Valores pequenos ficam suaves;
+                // os maiores ficam fortes, como no DOM antigo.
+                double buyHeat = Math.Sqrt(buyRatio);
+                double sellHeat = Math.Sqrt(sellRatio);
+                buyFlowBars[row].Opacity = buyVolume > 0 ? 0.16 + (0.84 * buyHeat) : 0.0;
+                sellFlowBars[row].Opacity = sellVolume > 0 ? 0.16 + (0.84 * sellHeat) : 0.0;
 
                 // V0.9.9.3 ATM: o preço não depende de MarketDepth.
                 // A leitura visual do fluxo fica nas colunas COMPRA/VENDA.
@@ -2094,9 +2115,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 dailyVolume.TryGetValue(levelPrice, out daily);
                 volumeCells[row].Text = daily > 0 ? daily.ToString() : "";
 
-                double volumeRatio = maxDailyVolume > 0
-                    ? Math.Min(1.0, (double)daily / maxDailyVolume)
-                    : 0.0;
+                double volumeRatio = 0.0;
+                if (daily > 0)
+                {
+                    long dailyMin = minDailyVisible == long.MaxValue ? 0 : minDailyVisible;
+                    long dailyRange = maxDailyVisible - dailyMin;
+                    volumeRatio = dailyRange > 0
+                        ? Math.Max(0.0, Math.Min(1.0, (double)(daily - dailyMin) / dailyRange))
+                        : 1.0;
+                }
 
                 // Mantém o mesmo princípio visual do Guardian Volume estável:
                 // raiz quadrada evita comprimir demais os níveis menores.
@@ -2106,12 +2133,21 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 Brush normalVolumeColor = new SolidColorBrush(Color.FromRgb(105, 105, 110));
                 if (SameProfilePrice(levelPrice, profilePoc))
+                {
                     volumeBars[row].Background = new SolidColorBrush(Color.FromRgb(225, 45, 45));
+                    volumeBars[row].Opacity = 1.0;
+                }
                 else if (SameProfilePrice(levelPrice, profileVah) ||
                          SameProfilePrice(levelPrice, profileVal))
+                {
                     volumeBars[row].Background = new SolidColorBrush(Color.FromRgb(230, 190, 35));
+                    volumeBars[row].Opacity = 1.0;
+                }
                 else
+                {
                     volumeBars[row].Background = normalVolumeColor;
+                    volumeBars[row].Opacity = daily > 0 ? 0.14 + (0.86 * visualRatio) : 0.0;
+                }
 
                 // V0.9.9.44 - leitura BID / ASK / LAST dentro da ladder.
                 // LAST continua com prioridade máxima (amarelo).
