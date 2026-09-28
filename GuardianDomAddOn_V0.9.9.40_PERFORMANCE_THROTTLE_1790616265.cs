@@ -751,7 +751,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.38 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
+                Text = "V0.9.9.40 PERF • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -967,7 +967,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.38 ATM • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.40 PERF • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1009,7 +1009,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 NinjaTrader.NinjaScript.AtmStrategy selectedAtm = atmStrategySelector.SelectedAtmStrategy;
                 if (selectedAtm == null)
                 {
-                    connectionStatus.Text = "V0.9.9.38 ATM • SELECIONE UMA ESTRATÉGIA ATM";
+                    connectionStatus.Text = "V0.9.9.40 PERF • SELECIONE UMA ESTRATÉGIA ATM";
                     return;
                 }
 
@@ -1034,7 +1034,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.38 ATM • ENVIADA: " + previewOrderSide +
+                    "V0.9.9.40 PERF • ENVIADA: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • Sim101";
@@ -1043,7 +1043,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.38 ATM • ERRO AO ENVIAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.40 PERF • ERRO AO ENVIAR: " + ex.Message;
             }
         }
 
@@ -1053,13 +1053,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.38 ATM • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.40 PERF • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.9.38 ATM • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.40 PERF • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -1069,12 +1069,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.38 ATM • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.40 PERF • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.38 ATM • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.40 PERF • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1160,7 +1160,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.38 ATM • STOP " +
+                "V0.9.9.40 PERF • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1221,8 +1221,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.38 ATM • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.38 ATM • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.40 PERF • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.40 PERF • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1231,7 +1231,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.38 ATM • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.40 PERF • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1292,7 +1292,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.38 ATM • ORDEM: " + statePt +
+                    "V0.9.9.40 PERF • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1332,7 +1332,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.38 ATM • " + previewOrderSide +
+                "V0.9.9.40 PERF • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1344,7 +1344,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             if (currentInstrument == null)
                 return;
 
+            // V0.9.9.40 PERFORMANCE:
+            // processamento de mercado continua acumulando todos os negócios,
+            // mas perfil + interface são consolidados no timer (10 Hz).
+            // Evita redesenhar toda a ladder a cada evento de market data.
             RefreshDailyProfile();
+            RecalculateDailyProfile();
             UpdateDisplay();
         }
 
@@ -1385,11 +1390,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.38 ATM • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.40 PERF • SELECIONE UM ATIVO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.38 ATM • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
+            connectionStatus.Text = "V0.9.9.40 PERF • CONECTANDO MARKET DATA • ENVIO SOMENTE POR BOTÃO / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1570,7 +1575,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     AccumulateTrade(price, volume, eventAsk, eventBid);
                 }
 
-                UpdateDisplay();
+                // V0.9.9.40: sem UpdateDisplay() por evento.
+                // A interface é atualizada pelo timer de 100 ms.
             }));
         }
 
@@ -1619,8 +1625,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 liveVolumeDuringHistoryLoad[levelPrice] = buffered + volume;
             }
 
-            RecalculateDailyProfile();
-
+            // V0.9.9.40: não recalcular o perfil inteiro a cada negócio.
+            // O timer de 100 ms faz o recálculo consolidado.
             lastAggressorSide = side;
             flowTrades++;
         }
@@ -1853,7 +1859,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.38 ATM • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.40 PERF • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1916,11 +1922,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.38 ATM • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.40 PERF • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.38 ATM • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.40 PERF • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
