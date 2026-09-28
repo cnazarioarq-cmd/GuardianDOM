@@ -690,7 +690,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 deltaBorders[i] = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(36, 36, 39)),
+                    // V0.9.9.49 - mesmo fundo-base das colunas VENDA/COMPRA.
+                    Background = new SolidColorBrush(Color.FromRgb(55, 55, 58)),
                     BorderBrush = new SolidColorBrush(Color.FromRgb(52, 52, 55)),
                     BorderThickness = new Thickness(0, 0, 1, 1)
                 };
@@ -764,14 +765,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 Margin = new Thickness(8, 0, 8, 8),
                 Padding = new Thickness(8),
-                Background = new SolidColorBrush(Color.FromRgb(30, 30, 32)),
+                // V0.9.9.50 - bloco inferior com o mesmo fundo-base cinza usado na região superior/ladder.
+                Background = new SolidColorBrush(Color.FromRgb(55, 55, 58)),
                 BorderBrush = new SolidColorBrush(Color.FromRgb(80, 80, 84)),
                 BorderThickness = new Thickness(1)
             };
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.48 DYNAMIC DELTA HEAT • SELECIONE UM ATIVO • PRÉVIA LOCAL / Sim101",
+                Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • SELECIONE UM ATIVO • PRÉVIA LOCAL / Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -988,7 +990,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1004,7 +1006,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.48 DYNAMIC DELTA HEAT • CONFIRMADA: " + previewOrderSide +
+                "V0.9.9.50 BOTTOM BACKGROUND MATCH • CONFIRMADA: " + previewOrderSide +
                 " " + previewOrderQuantity + " @ " +
                 currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType + " • NENHUMA ORDEM ENVIADA";
@@ -1019,13 +1021,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (guardianSubmittedOrder == null)
             {
-                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
                 return;
             }
 
@@ -1035,12 +1037,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 guardianOrderStatus = "CANCELAMENTO SOLICITADO";
                 if (orderStateStatus != null)
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • CANCELAMENTO SOLICITADO • aguardando confirmação";
+                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • CANCELAMENTO SOLICITADO • aguardando confirmação";
                 cancelOrderButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • ERRO AO CANCELAR: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1126,7 +1128,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.48 DYNAMIC DELTA HEAT • STOP " +
+                "V0.9.9.50 BOTTOM BACKGROUND MATCH • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1187,8 +1189,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.48 DYNAMIC DELTA HEAT • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.48 DYNAMIC DELTA HEAT • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.50 BOTTOM BACKGROUND MATCH • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.50 BOTTOM BACKGROUND MATCH • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1197,7 +1199,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1258,7 +1260,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.48 DYNAMIC DELTA HEAT • ORDEM: " + statePt +
+                    "V0.9.9.50 BOTTOM BACKGROUND MATCH • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1298,7 +1300,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.48 DYNAMIC DELTA HEAT • " + previewOrderSide +
+                "V0.9.9.50 BOTTOM BACKGROUND MATCH • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1357,11 +1359,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • SELECIONE UM ATIVO • PRÉVIA LOCAL / Sim101";
+                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • SELECIONE UM ATIVO • PRÉVIA LOCAL / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • CONECTANDO MARKET DATA • PRÉVIA LOCAL / Sim101";
+            connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • CONECTANDO MARKET DATA • PRÉVIA LOCAL / Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1826,7 +1828,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1889,11 +1891,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.48 DYNAMIC DELTA HEAT • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
