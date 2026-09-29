@@ -181,6 +181,10 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private TextBlock orderStateStatus;
         private Button sendPreviewButton;
         private Button cancelOrderButton;
+        private Button marketBuyButton;
+        private Button marketSellButton;
+        private TextBlock marketPnlValue;
+        private Button flattenButton;
         private Order guardianSubmittedOrder;
         private Account guardianOrderAccount;
         // V0.9.9.54 - o clique em cancelar apenas SOLICITA o cancelamento.
@@ -399,21 +403,21 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 Background = new SolidColorBrush(Color.FromRgb(32, 32, 34))
             };
 
-            ColumnDefinition headerSellCol = new ColumnDefinition { Width = new GridLength(90) };
-            ColumnDefinition headerPriceCol = new ColumnDefinition { Width = new GridLength(100) };
             ColumnDefinition headerBuyCol = new ColumnDefinition { Width = new GridLength(90) };
+            ColumnDefinition headerPriceCol = new ColumnDefinition { Width = new GridLength(100) };
+            ColumnDefinition headerSellCol = new ColumnDefinition { Width = new GridLength(90) };
             ColumnDefinition headerVolumeCol = new ColumnDefinition { Width = new GridLength(75) };
             ColumnDefinition headerDeltaCol = new ColumnDefinition { Width = new GridLength(115) };
 
-            columnHeader.ColumnDefinitions.Add(headerSellCol);
-            columnHeader.ColumnDefinitions.Add(headerPriceCol);
             columnHeader.ColumnDefinitions.Add(headerBuyCol);
+            columnHeader.ColumnDefinitions.Add(headerPriceCol);
+            columnHeader.ColumnDefinitions.Add(headerSellCol);
             columnHeader.ColumnDefinitions.Add(headerVolumeCol);
             columnHeader.ColumnDefinitions.Add(headerDeltaCol);
 
-            AddHeaderCell(columnHeader, "VENDA", 0);
+            AddHeaderCell(columnHeader, "COMPRA", 0);
             AddHeaderCell(columnHeader, "PREÇO", 1);
-            AddHeaderCell(columnHeader, "COMPRA", 2);
+            AddHeaderCell(columnHeader, "VENDA", 2);
             AddHeaderCell(columnHeader, "VOLUME", 3);
             AddHeaderCell(columnHeader, "DELTA", 4);
 
@@ -455,15 +459,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 Background = new SolidColorBrush(Color.FromRgb(36, 36, 39))
             };
 
-            ColumnDefinition ladderSellCol = new ColumnDefinition { Width = new GridLength(90), MinWidth = 45 };
-            ColumnDefinition ladderPriceCol = new ColumnDefinition { Width = new GridLength(100), MinWidth = 60 };
             ColumnDefinition ladderBuyCol = new ColumnDefinition { Width = new GridLength(90), MinWidth = 45 };
+            ColumnDefinition ladderPriceCol = new ColumnDefinition { Width = new GridLength(100), MinWidth = 60 };
+            ColumnDefinition ladderSellCol = new ColumnDefinition { Width = new GridLength(90), MinWidth = 45 };
             ColumnDefinition ladderVolumeCol = new ColumnDefinition { Width = new GridLength(75), MinWidth = 50 };
             ColumnDefinition ladderDeltaCol = new ColumnDefinition { Width = new GridLength(115), MinWidth = 60 };
 
-            ladder.ColumnDefinitions.Add(ladderSellCol);
-            ladder.ColumnDefinitions.Add(ladderPriceCol);
             ladder.ColumnDefinitions.Add(ladderBuyCol);
+            ladder.ColumnDefinitions.Add(ladderPriceCol);
+            ladder.ColumnDefinitions.Add(ladderSellCol);
             ladder.ColumnDefinitions.Add(ladderVolumeCol);
             ladder.ColumnDefinitions.Add(ladderDeltaCol);
 
@@ -471,11 +475,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // Não usam GridSplitter e não entram na árvore da ladder.
             ColumnDefinition[] headerCols = new ColumnDefinition[]
             {
-                headerSellCol, headerPriceCol, headerBuyCol, headerVolumeCol, headerDeltaCol
+                headerBuyCol, headerPriceCol, headerSellCol, headerVolumeCol, headerDeltaCol
             };
             ColumnDefinition[] ladderCols = new ColumnDefinition[]
             {
-                ladderSellCol, ladderPriceCol, ladderBuyCol, ladderVolumeCol, ladderDeltaCol
+                ladderBuyCol, ladderPriceCol, ladderSellCol, ladderVolumeCol, ladderDeltaCol
             };
             double[] minWidths = new double[] { 45, 60, 45, 50, 60 };
 
@@ -636,7 +640,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 ladder.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-                bidCells[i] = AddLadderCell(ladder, "", i, 2,
+                bidCells[i] = AddLadderCell(ladder, "", i, 0,
                     new SolidColorBrush(Color.FromRgb(25, 92, 48)), out bidBorders[i]);
 
                 priceCells[i] = AddLadderCell(ladder, "--", i, 1,
@@ -661,16 +665,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     e.Handled = true;
                 };
 
-                askCells[i] = AddLadderCell(ladder, "", i, 0,
+                askCells[i] = AddLadderCell(ladder, "", i, 2,
                     new SolidColorBrush(Color.FromRgb(55, 55, 58)), out askBorders[i]);
 
-                // Barra proporcional COMPRA: cresce da esquerda para a direita.
-                buyFlowGrids[i] = new Grid();
+                // V0.9.9.69 - COMPRA: ancorada na DIREITA da coluna; cresce da DIREITA para a ESQUERDA.
+                buyFlowGrids[i] = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, ClipToBounds = true };
                 bidBorders[i].Child = null;
                 buyFlowBars[i] = new Border
                 {
                     Background = new SolidColorBrush(Color.FromRgb(25, 112, 55)),
-                    HorizontalAlignment = HorizontalAlignment.Left,
+                    HorizontalAlignment = HorizontalAlignment.Right,
                     Width = 0
                 };
                 buyFlowGrids[i].Children.Add(buyFlowBars[i]);
@@ -678,13 +682,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 bidBorders[i].Child = buyFlowGrids[i];
                 bidBorders[i].Background = new SolidColorBrush(Color.FromRgb(55, 55, 58));
 
-                // Barra proporcional VENDA: cresce da direita para a esquerda.
-                sellFlowGrids[i] = new Grid();
+                // V0.9.9.69 - VENDA: ancorada na ESQUERDA da coluna; cresce da ESQUERDA para a DIREITA.
+                sellFlowGrids[i] = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch, ClipToBounds = true };
                 askBorders[i].Child = null;
                 sellFlowBars[i] = new Border
                 {
                     Background = new SolidColorBrush(Color.FromRgb(145, 45, 45)),
-                    HorizontalAlignment = HorizontalAlignment.Right,
+                    HorizontalAlignment = HorizontalAlignment.Left,
                     Width = 0
                 };
                 sellFlowGrids[i].Children.Add(sellFlowBars[i]);
@@ -725,20 +729,20 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 deltaNegativeBars[i] = new Border
                 {
                     Background = new SolidColorBrush(Color.FromRgb(125, 22, 25)),
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    VerticalAlignment = VerticalAlignment.Stretch,
-                    Width = 0
-                };
-                Grid.SetColumn(deltaNegativeBars[i], 0);
-
-                deltaPositiveBars[i] = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromRgb(20, 105, 35)),
                     HorizontalAlignment = HorizontalAlignment.Left,
                     VerticalAlignment = VerticalAlignment.Stretch,
                     Width = 0
                 };
-                Grid.SetColumn(deltaPositiveBars[i], 1);
+                Grid.SetColumn(deltaNegativeBars[i], 1);
+
+                deltaPositiveBars[i] = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(20, 105, 35)),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Width = 0
+                };
+                Grid.SetColumn(deltaPositiveBars[i], 0);
 
                 // Mantém deltaCells para compatibilidade com a rotina de limpeza,
                 // mas a exibição passa a usar textos espelhados em torno do zero.
@@ -750,12 +754,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     Foreground = Brushes.WhiteSmoke,
                     FontSize = 11,
                     FontWeight = FontWeights.Bold,
-                    HorizontalAlignment = HorizontalAlignment.Right,
+                    HorizontalAlignment = HorizontalAlignment.Left,
                     VerticalAlignment = VerticalAlignment.Center,
-                    TextAlignment = TextAlignment.Right,
-                    Margin = new Thickness(2, 0, 4, 0)
+                    TextAlignment = TextAlignment.Left,
+                    Margin = new Thickness(4, 0, 2, 0)
                 };
-                Grid.SetColumn(deltaNegativeCells[i], 0);
+                Grid.SetColumn(deltaNegativeCells[i], 1);
 
                 deltaPositiveCells[i] = new TextBlock
                 {
@@ -763,12 +767,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     Foreground = Brushes.WhiteSmoke,
                     FontSize = 11,
                     FontWeight = FontWeights.Bold,
-                    HorizontalAlignment = HorizontalAlignment.Left,
+                    HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Center,
-                    TextAlignment = TextAlignment.Left,
-                    Margin = new Thickness(4, 0, 2, 0)
+                    TextAlignment = TextAlignment.Right,
+                    Margin = new Thickness(2, 0, 4, 0)
                 };
-                Grid.SetColumn(deltaPositiveCells[i], 1);
+                Grid.SetColumn(deltaPositiveCells[i], 0);
 
                 deltaGrids[i].Children.Add(deltaNegativeBars[i]);
                 deltaGrids[i].Children.Add(deltaPositiveBars[i]);
@@ -792,7 +796,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101",
+                Text = "V0.9.9.70 BUTTON LAYOUT FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -892,6 +896,78 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             navigationPanel.Children.Add(ladderDownButton);
             statusPanel.Children.Add(navigationPanel);
 
+            // V0.9.9.67 - padrão visual do NinjaTrader:
+            // COMPRA à esquerda, PnL ao centro e VENDA à direita.
+            Grid quickTradePanel = new Grid
+            {
+                Margin = new Thickness(8, 5, 8, 0)
+            };
+            // V0.9.9.70 - mantém histogramas da 69; botões: COMPRA 33% | PnL 34% | VENDA 33%.
+            quickTradePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(33, GridUnitType.Star) });
+            quickTradePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34, GridUnitType.Star) });
+            quickTradePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(33, GridUnitType.Star) });
+
+            marketBuyButton = new Button
+            {
+                Content = "COMPRA MERCADO",
+                Height = 30,
+                FontSize = 10,
+                Margin = new Thickness(0, 0, 2, 0),
+                Background = Brushes.Green,
+                Foreground = Brushes.White
+            };
+            marketBuyButton.Click += (s, e) => SubmitMarketEntry(true);
+            Grid.SetColumn(marketBuyButton, 0);
+            quickTradePanel.Children.Add(marketBuyButton);
+
+            Border pnlBox = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(32, 32, 34)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(80, 80, 82)),
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(2, 0, 2, 0),
+                Height = 30
+            };
+            marketPnlValue = new TextBlock
+            {
+                Text = "PnL  $ 0,00",
+                Foreground = Brushes.WhiteSmoke,
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            pnlBox.Child = marketPnlValue;
+            Grid.SetColumn(pnlBox, 1);
+            quickTradePanel.Children.Add(pnlBox);
+
+            marketSellButton = new Button
+            {
+                Content = "VENDA MERCADO",
+                Height = 30,
+                FontSize = 10,
+                Margin = new Thickness(2, 0, 0, 0),
+                Background = Brushes.DarkRed,
+                Foreground = Brushes.White
+            };
+            marketSellButton.Click += (s, e) => SubmitMarketEntry(false);
+            Grid.SetColumn(marketSellButton, 2);
+            quickTradePanel.Children.Add(marketSellButton);
+
+            statusPanel.Children.Add(quickTradePanel);
+
+            flattenButton = new Button
+            {
+                Content = "FECHAMENTO",
+                Height = 30,
+                Margin = new Thickness(8, 4, 8, 0),
+                Background = Brushes.DarkGoldenrod,
+                Foreground = Brushes.White,
+                FontWeight = FontWeights.Bold
+            };
+            flattenButton.Click += FlattenButton_Click;
+            statusPanel.Children.Add(flattenButton);
+
             sendPreviewButton = new Button
             {
                 Content = "ENVIAR ORDEM — SOMENTE Sim101",
@@ -900,7 +976,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 IsEnabled = false
             };
             sendPreviewButton.Click += SendPreviewButton_Click;
-            statusPanel.Children.Add(sendPreviewButton);
+            // V0.9.9.70 - botão legado ENVIAR ORDEM não é mais exibido.
 
             cancelOrderButton = new Button
             {
@@ -910,7 +986,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 IsEnabled = false
             };
             cancelOrderButton.Click += CancelOrderButton_Click;
-            statusPanel.Children.Add(cancelOrderButton);
+            // V0.9.9.70 - botão legado CANCELAR não é mais exibido.
 
             statusPanel.Children.Add(profileStatus);
             statusBorder.Child = statusPanel;
@@ -946,13 +1022,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             ColumnDefinition[] customizationHeaderCols = new ColumnDefinition[]
             {
-                headerSellCol, headerPriceCol, headerBuyCol, headerVolumeCol, headerDeltaCol
+                headerBuyCol, headerPriceCol, headerSellCol, headerVolumeCol, headerDeltaCol
             };
             ColumnDefinition[] customizationLadderCols = new ColumnDefinition[]
             {
-                ladderSellCol, ladderPriceCol, ladderBuyCol, ladderVolumeCol, ladderDeltaCol
+                ladderBuyCol, ladderPriceCol, ladderSellCol, ladderVolumeCol, ladderDeltaCol
             };
-            string[] customizationColumnNames = new string[] { "VENDA", "PREÇO", "COMPRA", "VOLUME", "DELTA" };
+            string[] customizationColumnNames = new string[] { "COMPRA", "PREÇO", "VENDA", "VOLUME", "DELTA" };
             double[] customizationDefaultWidths = new double[] { 90, 100, 90, 75, 115 };
             double[] customizationMinWidths = new double[] { 45, 60, 45, 50, 60 };
             double[] customizationSavedWidths = new double[] { 90, 100, 90, 75, 115 };
@@ -1037,6 +1113,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             orderButtonsMenu.Click += (s, e) =>
             {
                 Visibility v = orderButtonsMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+                if (marketBuyButton != null) marketBuyButton.Visibility = v;
+                if (marketSellButton != null) marketSellButton.Visibility = v;
+                if (flattenButton != null) flattenButton.Visibility = v;
                 sendPreviewButton.Visibility = v;
                 cancelOrderButton.Visibility = v;
             };
@@ -1067,6 +1146,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 orderStateStatus.Visibility = Visibility.Visible;
                 profileStatus.Visibility = Visibility.Visible;
                 navigationPanel.Visibility = Visibility.Visible;
+                if (marketBuyButton != null) marketBuyButton.Visibility = Visibility.Visible;
+                if (marketSellButton != null) marketSellButton.Visibility = Visibility.Visible;
+                if (flattenButton != null) flattenButton.Visibility = Visibility.Visible;
                 sendPreviewButton.Visibility = Visibility.Visible;
                 cancelOrderButton.Visibility = Visibility.Visible;
                 quotesMenu.IsChecked = true;
@@ -1190,6 +1272,115 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             sendPreviewButton.IsEnabled = sim101 && ready;
         }
 
+        // V0.9.9.65 - entrada imediata a mercado usando a ATM nativa selecionada.
+        private void SubmitMarketEntry(bool buy)
+        {
+            Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
+            if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
+            {
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • BLOQUEADO: SOMENTE Sim101";
+                return;
+            }
+
+            if (currentInstrument == null)
+                return;
+
+            NinjaTrader.NinjaScript.AtmStrategy selectedAtm =
+                atmStrategySelector == null ? null : atmStrategySelector.SelectedAtmStrategy;
+            if (selectedAtm == null)
+            {
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • SELECIONE UMA ESTRATÉGIA ATM";
+                return;
+            }
+
+            int quantity = 1;
+            if (quantitySelector != null && quantitySelector.Value > 0)
+                quantity = (int)quantitySelector.Value;
+
+            try
+            {
+                guardianEntrySignalName = "Entry";
+                Order order = account.CreateOrder(
+                    currentInstrument,
+                    buy ? OrderAction.Buy : OrderAction.SellShort,
+                    OrderType.Market,
+                    OrderEntry.Manual,
+                    TimeInForce.Day,
+                    quantity,
+                    0,
+                    0,
+                    string.Empty,
+                    guardianEntrySignalName,
+                    Core.Globals.MaxDate,
+                    null);
+
+                guardianSubmittedOrder = null;
+                guardianStopOrder = null;
+                guardianTargetOrder = null;
+                bracketSubmittedForEntry = false;
+                beMonitorActive = false;
+                guardianCancelRequested = false;
+
+                if (guardianOrderAccount != account)
+                {
+                    if (guardianOrderAccount != null)
+                        guardianOrderAccount.OrderUpdate -= GuardianOrderAccount_OrderUpdate;
+                    guardianOrderAccount = account;
+                    guardianOrderAccount.OrderUpdate += GuardianOrderAccount_OrderUpdate;
+                }
+
+                guardianSubmittedOrder = order;
+                guardianOrderStatus = "SUBMIT CALLED";
+                NinjaTrader.NinjaScript.AtmStrategy.StartAtmStrategy(selectedAtm, order);
+
+                if (orderStateStatus != null)
+                {
+                    orderStateStatus.Text = "ORDEM: " + (buy ? "COMPRA" : "VENDA") + " MERCADO • ENVIO SOLICITADO";
+                    orderStateStatus.Foreground = Brushes.Gold;
+                }
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • " +
+                    (buy ? "COMPRA" : "VENDA") + " MERCADO " + quantity + " • ATM • Sim101";
+            }
+            catch (Exception ex)
+            {
+                guardianSubmittedOrder = null;
+                guardianOrderStatus = "ERRO";
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • ERRO AO ENVIAR MERCADO: " + ex.Message;
+            }
+        }
+
+        // V0.9.9.65 - fechamento do ativo selecionado.
+        // Account.Flatten cancela ordens de trabalho do instrumento e zera a posição,
+        // evitando deixar STOP/ALVO da ATM órfãos após o fechamento manual.
+        private void FlattenButton_Click(object sender, RoutedEventArgs e)
+        {
+            Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
+            if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
+            {
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • BLOQUEADO: SOMENTE Sim101";
+                return;
+            }
+            if (currentInstrument == null)
+                return;
+
+            try
+            {
+                account.Flatten(new Instrument[] { currentInstrument });
+                guardianOrderStatus = "FECHAMENTO SOLICITADO";
+                if (orderStateStatus != null)
+                {
+                    orderStateStatus.Text = "ORDEM: FECHAMENTO SOLICITADO";
+                    orderStateStatus.Foreground = Brushes.Gold;
+                }
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • FECHAMENTO SOLICITADO • " +
+                    currentInstrument.FullName + " • Sim101";
+            }
+            catch (Exception ex)
+            {
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • ERRO NO FECHAMENTO: " + ex.Message;
+            }
+        }
+
         // V0.9.9.52 - primeiro envio real, EXCLUSIVAMENTE na Sim101.
         // A entrada usa a ATM nativa selecionada; conta real continua bloqueada.
         private void SendPreviewButton_Click(object sender, RoutedEventArgs e)
@@ -1198,7 +1389,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1210,7 +1401,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (selectedAtm == null)
             {
-                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • SELECIONE UMA ESTRATÉGIA ATM";
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • SELECIONE UMA ESTRATÉGIA ATM";
                 UpdateSendButtonState();
                 return;
             }
@@ -1307,7 +1498,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • ENVIO SOLICITADO: " + previewOrderSide +
+                    "V0.9.9.70 BUTTON LAYOUT FIX • ENVIO SOLICITADO: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • SUBMIT DIAGNOSTIC • Sim101";
@@ -1326,7 +1517,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • ERRO AO ENVIAR: " + ex.Message;
+                    "V0.9.9.70 BUTTON LAYOUT FIX • ERRO AO ENVIAR: " + ex.Message;
 
                 UpdateSendButtonState();
             }
@@ -1371,7 +1562,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1427,7 +1618,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         if (sendPreviewButton != null)
                             sendPreviewButton.IsEnabled = false;
                         connectionStatus.Text =
-                            "V0.9.9.64 RESPONSIVE COLUMNS FIX • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
+                            "V0.9.9.70 BUTTON LAYOUT FIX • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
                         return;
                     }
 
@@ -1456,7 +1647,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = false;
 
                 connectionStatus.Text =
-                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • CANCELANDO " +
+                    "V0.9.9.70 BUTTON LAYOUT FIX • CANCELANDO " +
                     toCancel.Count + " ORDEM(NS) GUARDIANDOM • Sim101";
             }
             catch (Exception ex)
@@ -1471,7 +1662,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • ERRO AO CANCELAR: " + ex.Message;
+                    "V0.9.9.70 BUTTON LAYOUT FIX • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1557,7 +1748,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.64 RESPONSIVE COLUMNS FIX • STOP " +
+                "V0.9.9.70 BUTTON LAYOUT FIX • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1637,8 +1828,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.64 RESPONSIVE COLUMNS FIX • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.64 RESPONSIVE COLUMNS FIX • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.70 BUTTON LAYOUT FIX • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.70 BUTTON LAYOUT FIX • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1647,7 +1838,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1724,7 +1915,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • ORDEM: " + statePt +
+                    "V0.9.9.70 BUTTON LAYOUT FIX • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1764,7 +1955,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.64 RESPONSIVE COLUMNS FIX • " + previewOrderSide +
+                "V0.9.9.70 BUTTON LAYOUT FIX • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1823,11 +2014,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
+            connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -2292,7 +2483,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -2320,6 +2511,40 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
         }
 
+        // V0.9.9.67 - PnL não realizado da posição do ativo selecionado.
+        private void UpdateMarketPnl()
+        {
+            if (marketPnlValue == null)
+                return;
+
+            double pnl = 0.0;
+            try
+            {
+                Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
+                if (account != null && currentInstrument != null && lastPrice > 0)
+                {
+                    foreach (Position position in account.Positions)
+                    {
+                        if (position == null || position.Instrument == null)
+                            continue;
+
+                        if (string.Equals(position.Instrument.FullName, currentInstrument.FullName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            pnl = position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, lastPrice);
+                            break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                pnl = 0.0;
+            }
+
+            marketPnlValue.Text = "PnL  " + pnl.ToString("C2");
+            marketPnlValue.Foreground = pnl > 0 ? Brushes.LimeGreen : (pnl < 0 ? Brushes.Red : Brushes.WhiteSmoke);
+        }
+
         private void UpdateDisplay()
         {
             MonitorBreakevenTriggers();
@@ -2329,6 +2554,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             bidValue.Text = FormatPrice(bidPrice);
             askValue.Text = FormatPrice(askPrice);
             lastValue.Text = FormatPrice(lastPrice);
+            UpdateMarketPnl();
 
             if (profileStatus != null)
             {
@@ -2355,11 +2581,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.70 BUTTON LAYOUT FIX • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
