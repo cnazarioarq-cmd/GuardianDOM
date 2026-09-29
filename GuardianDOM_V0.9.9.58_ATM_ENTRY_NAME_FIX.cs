@@ -183,6 +183,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private Button cancelOrderButton;
         private Order guardianSubmittedOrder;
         private Account guardianOrderAccount;
+        // V0.9.9.54 - o clique em cancelar apenas SOLICITA o cancelamento.
+        // A referência/estado só é liberada após confirmação terminal do NinjaTrader.
+        private bool guardianCancelRequested = false;
+        // V0.9.9.56 - nome estável compatível com StartAtmStrategy; confirmação real vem de OrderUpdate.
+        // V0.9.9.55 - nome único por envio para impedir que ordens antigas do GuardianDOM
+        // sejam confundidas com a entrada atual durante tracking/cancelamento.
+        private string guardianEntrySignalName = string.Empty;
         private string guardianOrderStatus = "SEM ORDEM";
         private bool beMonitorActive = false;
         private bool be20Detected = false;
@@ -773,7 +780,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • SELECIONE UM ATIVO • PRÉVIA LOCAL / Sim101",
+                Text = "V0.9.9.58 ATM ENTRY NAME FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -875,7 +882,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             sendPreviewButton = new Button
             {
-                Content = "CONFIRMAR PRÉVIA — NÃO ENVIA ORDEM",
+                Content = "ENVIAR ORDEM — SOMENTE Sim101",
                 Height = 28,
                 Margin = new Thickness(8, 5, 8, 0),
                 IsEnabled = false
@@ -885,7 +892,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             cancelOrderButton = new Button
             {
-                Content = "CANCELAR — SEM ORDEM NA V0.9.9.45",
+                Content = "CANCELAR — SEM ORDEM",
                 Height = 28,
                 Margin = new Thickness(8, 4, 8, 0),
                 IsEnabled = false
@@ -969,6 +976,19 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
         private void UpdateSendButtonState()
         {
+            bool guardianHasLiveOrder =
+                guardianSubmittedOrder != null &&
+                guardianSubmittedOrder.OrderState != OrderState.Cancelled &&
+                guardianSubmittedOrder.OrderState != OrderState.Filled &&
+                guardianSubmittedOrder.OrderState != OrderState.Rejected;
+
+            if (guardianHasLiveOrder)
+            {
+                if (sendPreviewButton != null)
+                    sendPreviewButton.IsEnabled = false;
+                return;
+            }
+
             if (sendPreviewButton == null)
                 return;
 
@@ -977,72 +997,295 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             bool ready = currentInstrument != null
                 && !double.IsNaN(previewOrderPrice)
                 && previewOrderQuantity > 0
+                && atmStrategySelector != null
+                && atmStrategySelector.SelectedAtmStrategy != null
                 && (previewOrderType == "LIMIT" || previewOrderType == "STOP MARKET");
 
             sendPreviewButton.IsEnabled = sim101 && ready;
         }
 
-        // V0.9.9.45 - confirmação 100% local da prévia.
-        // IMPORTANTE: esta rotina NÃO cria, NÃO submete e NÃO inicia qualquer ordem/ATM.
+        // V0.9.9.52 - primeiro envio real, EXCLUSIVAMENTE na Sim101.
+        // A entrada usa a ATM nativa selecionada; conta real continua bloqueada.
         private void SendPreviewButton_Click(object sender, RoutedEventArgs e)
         {
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             if (currentInstrument == null || double.IsNaN(previewOrderPrice) || previewOrderQuantity <= 0)
                 return;
 
-            guardianOrderStatus = "PRÉVIA CONFIRMADA";
+            NinjaTrader.NinjaScript.AtmStrategy selectedAtm =
+                atmStrategySelector == null ? null : atmStrategySelector.SelectedAtmStrategy;
 
-            if (orderStateStatus != null)
+            if (selectedAtm == null)
             {
-                orderStateStatus.Text = "PRÉVIA CONFIRMADA • NÃO ENVIADA";
-                orderStateStatus.Foreground = Brushes.Gold;
+                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • SELECIONE UMA ESTRATÉGIA ATM";
+                UpdateSendButtonState();
+                return;
             }
 
-            connectionStatus.Text =
-                "V0.9.9.50 BOTTOM BACKGROUND MATCH • CONFIRMADA: " + previewOrderSide +
-                " " + previewOrderQuantity + " @ " +
-                currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
-                " • " + previewOrderType + " • NENHUMA ORDEM ENVIADA";
+            OrderAction action = previewOrderSide == "COMPRA"
+                ? OrderAction.Buy
+                : OrderAction.SellShort;
 
-            // Mantém a seleção ativa para permitir revisar/alterar o nível.
-            UpdateSendButtonState();
+            OrderType type = previewOrderType == "STOP MARKET"
+                ? OrderType.StopMarket
+                : OrderType.Limit;
+
+            double limitPrice = type == OrderType.Limit ? previewOrderPrice : 0;
+            double stopPrice  = type == OrderType.StopMarket ? previewOrderPrice : 0;
+
+            try
+            {
+                // V0.9.9.58: requisito crítico da API StartAtmStrategy.
+                // Para uma entrada associada a ATM, o parâmetro name do CreateOrder
+                // DEVE ser exatamente "Entry". Qualquer outro nome pode deixar a ordem
+                // apenas em Initialized e impedir a submissão efetiva.
+                guardianEntrySignalName = "Entry";
+
+                Order order = account.CreateOrder(
+                    currentInstrument,
+                    action,
+                    type,
+                    OrderEntry.Manual,
+                    TimeInForce.Day,
+                    previewOrderQuantity,
+                    limitPrice,
+                    stopPrice,
+                    string.Empty,
+                    guardianEntrySignalName,
+                    Core.Globals.MaxDate,
+                    null);
+
+                // Limpa referências da entrada anterior antes de iniciar uma nova.
+                guardianSubmittedOrder = null;
+                guardianStopOrder = null;
+                guardianTargetOrder = null;
+                bracketSubmittedForEntry = false;
+                beMonitorActive = false;
+                be20Detected = false;
+                be1ChangeSent = false;
+                be40Detected = false;
+                beEntryFillPrice = double.NaN;
+                beEntryDirection = 0;
+
+                // Assina os eventos ANTES do StartAtmStrategy para não perder
+                // atualizações rápidas de Accepted/Working/Fill.
+                if (guardianOrderAccount != account)
+                {
+                    if (guardianOrderAccount != null)
+                        guardianOrderAccount.OrderUpdate -= GuardianOrderAccount_OrderUpdate;
+
+                    guardianOrderAccount = account;
+                    guardianOrderAccount.OrderUpdate += GuardianOrderAccount_OrderUpdate;
+                }
+
+                guardianCancelRequested = false;
+                guardianSubmittedOrder = order;
+
+                // V0.9.9.58 - diagnóstico do ponto exato de submissão.
+                // Mostra o estado devolvido por CreateOrder ANTES de entregar a ordem à ATM.
+                guardianOrderStatus = "CREATE OK";
+                if (orderStateStatus != null)
+                {
+                    orderStateStatus.Text = "DIAG: CREATE OK • STATE=" + order.OrderState.ToString().ToUpperInvariant();
+                    orderStateStatus.Foreground = Brushes.Gold;
+                }
+
+                // A ATM nativa escolhida deve efetivamente submeter a entrada.
+                NinjaTrader.NinjaScript.AtmStrategy.StartAtmStrategy(selectedAtm, order);
+
+                // Se chegamos aqui, StartAtmStrategy retornou sem exceção. Não chamamos isso
+                // de ENVIADA: Accepted/Working/Rejected continua dependendo de OrderUpdate.
+                guardianOrderStatus = "SUBMIT CALLED";
+
+                string diagOrderId = string.IsNullOrEmpty(order.OrderId) ? "SEM ID" : order.OrderId;
+                if (orderStateStatus != null)
+                {
+                    orderStateStatus.Text =
+                        "DIAG: CREATE OK > SUBMIT CALLED • STATE=" +
+                        order.OrderState.ToString().ToUpperInvariant() +
+                        " • ID=" + diagOrderId;
+                    orderStateStatus.Foreground = Brushes.Gold;
+                }
+
+                if (cancelOrderButton != null)
+                {
+                    cancelOrderButton.Content = "CANCELAR ORDEM DO GUARDIANDOM";
+                    cancelOrderButton.IsEnabled = false;
+                }
+
+                connectionStatus.Text =
+                    "V0.9.9.58 ATM ENTRY NAME FIX • ENVIO SOLICITADO: " + previewOrderSide +
+                    " " + previewOrderQuantity + " @ " +
+                    currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
+                    " • " + previewOrderType + " • SUBMIT DIAGNOSTIC • Sim101";
+
+                sendPreviewButton.IsEnabled = false;
+            }
+            catch (Exception ex)
+            {
+                guardianSubmittedOrder = null;
+                guardianOrderStatus = "ERRO";
+
+                if (orderStateStatus != null)
+                {
+                    orderStateStatus.Text = "ORDEM: ERRO NO ENVIO";
+                    orderStateStatus.Foreground = Brushes.OrangeRed;
+                }
+
+                connectionStatus.Text =
+                    "V0.9.9.58 ATM ENTRY NAME FIX • ERRO AO ENVIAR: " + ex.Message;
+
+                UpdateSendButtonState();
+            }
+        }
+
+        // V0.9.9.52 - cancelamento da entrada ATM pela mesma Order enviada.
+        // V0.9.9.53 - cancelamento robusto: procura a ordem de entrada REAL/ATIVA
+        // na coleção da conta, pois StartAtmStrategy pode substituir a referência original.
+        // V0.9.9.54 - não libera/limpa a ordem no clique; aguarda confirmação terminal.
+        // V0.9.9.56 - signal name estável para compatibilidade com a ATM; a referência oficial
+        // é adotada somente a partir do fluxo real de OrderUpdate desta conta.
+        private bool IsGuardianEntryOrder(Order order)
+        {
+            if (order == null || currentInstrument == null)
+                return false;
+
+            bool sameInstrument = order.Instrument != null &&
+                string.Equals(order.Instrument.FullName, currentInstrument.FullName, StringComparison.OrdinalIgnoreCase);
+
+            bool guardianName = !string.IsNullOrEmpty(order.Name) &&
+                !string.IsNullOrEmpty(guardianEntrySignalName) &&
+                string.Equals(order.Name, guardianEntrySignalName, StringComparison.OrdinalIgnoreCase);
+
+            return sameInstrument && guardianName;
+        }
+
+        private bool IsOrderCancellable(Order order)
+        {
+            if (order == null)
+                return false;
+
+            return order.OrderState == OrderState.Accepted ||
+                   order.OrderState == OrderState.Working ||
+                   order.OrderState == OrderState.TriggerPending ||
+                   order.OrderState == OrderState.ChangePending ||
+                   order.OrderState == OrderState.Submitted;
         }
 
         private void CancelOrderButton_Click(object sender, RoutedEventArgs e)
         {
-            Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
+            Account account = guardianOrderAccount;
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • CANCELAMENTO BLOQUEADO: SOMENTE Sim101";
-                return;
-            }
-
-            if (guardianSubmittedOrder == null)
-            {
-                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • NENHUMA ORDEM DESTA INSTÂNCIA PARA CANCELAR";
+                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
             try
             {
-                account.Cancel(new[] { guardianSubmittedOrder });
-                guardianOrderStatus = "CANCELAMENTO SOLICITADO";
+                List<Order> toCancel = new List<Order>();
+
+                // Primeiro tenta a referência conhecida, se ainda for realmente cancelável.
+                if (IsOrderCancellable(guardianSubmittedOrder))
+                    toCancel.Add(guardianSubmittedOrder);
+
+                // Depois procura a ordem efetivamente registrada na conta.
+                // Isso cobre a troca de referência/ID feita pelo StartAtmStrategy.
+                foreach (Order candidate in account.Orders)
+                {
+                    if (!IsGuardianEntryOrder(candidate) || !IsOrderCancellable(candidate))
+                        continue;
+
+                    bool alreadyAdded = false;
+                    foreach (Order existing in toCancel)
+                    {
+                        if (IsSameOrder(existing, candidate))
+                        {
+                            alreadyAdded = true;
+                            break;
+                        }
+                    }
+
+                    if (!alreadyAdded)
+                        toCancel.Add(candidate);
+
+                    // Passa a acompanhar a ordem REAL vista pela conta.
+                    guardianSubmittedOrder = candidate;
+                }
+
+                if (toCancel.Count == 0)
+                {
+                    // V0.9.9.54: NÃO limpa a ordem por ausência momentânea de uma
+                    // referência cancelável. Se já houve solicitação, aguardamos a
+                    // confirmação terminal (Cancelled/Filled/Rejected) via OrderUpdate.
+                    if (guardianCancelRequested ||
+                        (guardianSubmittedOrder != null && guardianSubmittedOrder.OrderState == OrderState.CancelPending))
+                    {
+                        guardianCancelRequested = true;
+                        guardianOrderStatus = "CANCELANDO";
+                        if (orderStateStatus != null)
+                        {
+                            orderStateStatus.Text = "ORDEM: CANCELANDO • AGUARDANDO CONFIRMAÇÃO";
+                            orderStateStatus.Foreground = Brushes.Gold;
+                        }
+                        if (cancelOrderButton != null)
+                            cancelOrderButton.IsEnabled = false;
+                        if (sendPreviewButton != null)
+                            sendPreviewButton.IsEnabled = false;
+                        connectionStatus.Text =
+                            "V0.9.9.58 ATM ENTRY NAME FIX • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
+                        return;
+                    }
+
+                    guardianOrderStatus = "SEM ORDEM CANCELÁVEL";
+                    if (orderStateStatus != null)
+                    {
+                        orderStateStatus.Text = "ORDEM: SEM ORDEM CANCELÁVEL";
+                        orderStateStatus.Foreground = Brushes.White;
+                    }
+                    UpdateSendButtonState();
+                    return;
+                }
+
+                // A partir daqui o GuardianDOM entra em estado de cancelamento e
+                // permanece bloqueado até o OrderUpdate confirmar um estado terminal.
+                guardianCancelRequested = true;
+                account.Cancel(toCancel.ToArray());
+
+                guardianOrderStatus = "CANCELANDO";
                 if (orderStateStatus != null)
+                {
                     orderStateStatus.Text = "ORDEM: CANCELANDO";
-                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • CANCELAMENTO SOLICITADO • aguardando confirmação";
-                cancelOrderButton.IsEnabled = false;
+                    orderStateStatus.Foreground = Brushes.Gold;
+                }
+                if (cancelOrderButton != null)
+                    cancelOrderButton.IsEnabled = false;
+
+                connectionStatus.Text =
+                    "V0.9.9.58 ATM ENTRY NAME FIX • CANCELANDO " +
+                    toCancel.Count + " ORDEM(NS) GUARDIANDOM • Sim101";
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • ERRO AO CANCELAR: " + ex.Message;
+                guardianOrderStatus = "ERRO CANCELAMENTO";
+                if (orderStateStatus != null)
+                {
+                    orderStateStatus.Text = "ORDEM: ERRO AO CANCELAR";
+                    orderStateStatus.Foreground = Brushes.OrangeRed;
+                }
+                if (cancelOrderButton != null)
+                    cancelOrderButton.IsEnabled = true;
+
+                connectionStatus.Text =
+                    "V0.9.9.58 ATM ENTRY NAME FIX • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1128,7 +1371,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.50 BOTTOM BACKGROUND MATCH • STOP " +
+                "V0.9.9.58 ATM ENTRY NAME FIX • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1156,6 +1399,25 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             bool isEntry = IsSameOrder(e.Order, guardianSubmittedOrder);
             bool isStop = IsSameOrder(e.Order, guardianStopOrder);
             bool isTarget = IsSameOrder(e.Order, guardianTargetOrder);
+
+            // V0.9.9.56: StartAtmStrategy pode publicar uma nova instância/ID da entrada.
+            // Só o OrderUpdate transforma o pedido de envio em uma ordem confirmada.
+            if (!isEntry && IsGuardianEntryOrder(e.Order))
+            {
+                // V0.9.9.54: ordens GuardianDOM antigas já Cancelled/Rejected não
+                // podem "roubar" o rastreamento da entrada atual. Só adotamos uma
+                // nova instância publicada pela ATM enquanto ela ainda está ativa,
+                // ou se ela acabou de ser executada.
+                bool adoptable = IsOrderCancellable(e.Order) ||
+                    e.Order.OrderState == OrderState.CancelPending ||
+                    e.Order.OrderState == OrderState.Filled;
+
+                if (adoptable)
+                {
+                    guardianSubmittedOrder = e.Order;
+                    isEntry = true;
+                }
+            }
 
             // Ignora qualquer ordem que não pertença a esta instância do GuardianDOM.
             if (!isEntry && !isStop && !isTarget)
@@ -1189,8 +1451,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.50 BOTTOM BACKGROUND MATCH • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.50 BOTTOM BACKGROUND MATCH • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.58 ATM ENTRY NAME FIX • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.58 ATM ENTRY NAME FIX • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1199,7 +1461,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1216,7 +1478,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     state == OrderState.ChangePending;
 
                 if (cancelOrderButton != null)
-                    cancelOrderButton.IsEnabled = cancellable;
+                    cancelOrderButton.IsEnabled = cancellable && !guardianCancelRequested;
+
+                // Enquanto o NinjaTrader ainda não confirmou o cancelamento,
+                // também não permitimos um segundo envio.
+                if (guardianCancelRequested && sendPreviewButton != null)
+                    sendPreviewButton.IsEnabled = false;
 
                 string statePt;
                 switch (state)
@@ -1259,8 +1526,19 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         orderStateStatus.Foreground = Brushes.White;
                 }
 
+                // Somente uma confirmação terminal do NinjaTrader encerra o
+                // ciclo de cancelamento. O clique no botão, sozinho, nunca libera
+                // a interface nem apaga a referência da ordem.
+                if (state == OrderState.Cancelled ||
+                    state == OrderState.Filled ||
+                    state == OrderState.Rejected)
+                {
+                    guardianCancelRequested = false;
+                    UpdateSendButtonState();
+                }
+
                 connectionStatus.Text =
-                    "V0.9.9.50 BOTTOM BACKGROUND MATCH • ORDEM: " + statePt +
+                    "V0.9.9.58 ATM ENTRY NAME FIX • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1300,11 +1578,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.50 BOTTOM BACKGROUND MATCH • " + previewOrderSide +
+                "V0.9.9.58 ATM ENTRY NAME FIX • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
-                " • PRÉVIA PRONTA • CONFIRMAÇÃO LOCAL / Sim101";
+                " • PRÉVIA PRONTA • ENVIO SOMENTE Sim101";
         }
 
         private void OnDepthRefreshTimerTick(object sender, EventArgs e)
@@ -1359,11 +1637,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • SELECIONE UM ATIVO • PRÉVIA LOCAL / Sim101";
+                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • CONECTANDO MARKET DATA • PRÉVIA LOCAL / Sim101";
+            connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -1828,7 +2106,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -1891,11 +2169,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.50 BOTTOM BACKGROUND MATCH • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
