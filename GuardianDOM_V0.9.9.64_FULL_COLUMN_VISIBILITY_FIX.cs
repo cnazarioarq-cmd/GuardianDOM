@@ -649,6 +649,18 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 priceCells[i].MouseRightButtonDown +=
                     (s, e) => PreviewOrderAtRow(previewRow, "VENDA");
 
+                // V0.9.9.61 - rolagem direta na coluna PREÇO.
+                // Cada passo da roda desloca 1 tick para permitir buscar um preço específico.
+                // A rolagem coloca a ladder em modo MANUAL; CENTRALIZAR devolve ao modo AUTO.
+                priceCells[i].MouseWheel += (s, e) =>
+                {
+                    int wheelSteps = Math.Max(1, Math.Abs(e.Delta) / 120);
+                    ladderOffsetTicks += e.Delta > 0 ? wheelSteps : -wheelSteps;
+                    ladderManualNavigation = true;
+                    UpdateDisplay();
+                    e.Handled = true;
+                };
+
                 askCells[i] = AddLadderCell(ladder, "", i, 0,
                     new SolidColorBrush(Color.FromRgb(55, 55, 58)), out askBorders[i]);
 
@@ -780,7 +792,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.58 ATM ENTRY NAME FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101",
+                Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -906,6 +918,180 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Grid.SetRow(statusBorder, 5);
             root.Children.Add(statusBorder);
 
+            // V0.9.9.60 - menu de personalização visual, inspirado no menu do SuperDOM.
+            // IMPORTANTE: o menu não é anexado à ladder porque o botão direito sobre PREÇO
+            // continua reservado para a prévia de VENDA. Ele abre nas áreas superior/inferior
+            // do GuardianDOM (cabeçalho, seletores, cotações, cabeçalho das colunas e status).
+            ContextMenu customizationMenu = new ContextMenu();
+
+            MenuItem autoCenterMenu = new MenuItem { Header = "Centro automático", IsCheckable = true, IsChecked = !ladderManualNavigation };
+            autoCenterMenu.Click += (s, e) =>
+            {
+                if (autoCenterMenu.IsChecked)
+                {
+                    ladderOffsetTicks = 0;
+                    ladderManualNavigation = false;
+                    ladderDisplayCenter = double.NaN;
+                    UpdateDisplay();
+                }
+                else
+                {
+                    ladderManualNavigation = true;
+                }
+            };
+            customizationMenu.Items.Add(autoCenterMenu);
+
+            MenuItem columnsMenu = new MenuItem { Header = "Colunas..." };
+            customizationMenu.Items.Add(columnsMenu);
+
+            ColumnDefinition[] customizationHeaderCols = new ColumnDefinition[]
+            {
+                headerSellCol, headerPriceCol, headerBuyCol, headerVolumeCol, headerDeltaCol
+            };
+            ColumnDefinition[] customizationLadderCols = new ColumnDefinition[]
+            {
+                ladderSellCol, ladderPriceCol, ladderBuyCol, ladderVolumeCol, ladderDeltaCol
+            };
+            string[] customizationColumnNames = new string[] { "VENDA", "PREÇO", "COMPRA", "VOLUME", "DELTA" };
+            double[] customizationDefaultWidths = new double[] { 90, 100, 90, 75, 115 };
+            double[] customizationMinWidths = new double[] { 45, 60, 45, 50, 60 };
+            double[] customizationSavedWidths = new double[] { 90, 100, 90, 75, 115 };
+
+            for (int c = 0; c < customizationColumnNames.Length; c++)
+            {
+                int columnIndex = c;
+                MenuItem columnItem = new MenuItem
+                {
+                    Header = customizationColumnNames[c],
+                    IsCheckable = true,
+                    IsChecked = true
+                };
+                columnItem.Click += (s, e) =>
+                {
+                    // V0.9.9.64 - RESPONSIVE COLUMNS FIX:
+                    // ocultar uma coluna nao pode reduzir a largura total da ladder.
+                    // As colunas visiveis passam a usar STAR proporcional ao tamanho
+                    // padrao, ocupando automaticamente 100% da area disponivel.
+                    if (!columnItem.IsChecked)
+                    {
+                        double currentWidth = customizationHeaderCols[columnIndex].ActualWidth;
+                        if (currentWidth > 1)
+                            customizationSavedWidths[columnIndex] = currentWidth;
+                    }
+
+                    for (int rc = 0; rc < customizationColumnNames.Length; rc++)
+                    {
+                        MenuItem rcItem = columnsMenu.Items[rc] as MenuItem;
+                        bool visible = rcItem != null && rcItem.IsChecked;
+
+                        if (!visible)
+                        {
+                            // V0.9.9.64 - FULL COLUMN VISIBILITY FIX:
+                            // a ladder possuia MinWidth nas colunas. Width=0 sozinho nao
+                            // conseguia colapsar a coluna e os dados continuavam visiveis.
+                            // Zera tambem MinWidth para a coluna realmente desaparecer.
+                            customizationHeaderCols[rc].MinWidth = 0;
+                            customizationLadderCols[rc].MinWidth = 0;
+                            customizationHeaderCols[rc].Width = new GridLength(0);
+                            customizationLadderCols[rc].Width = new GridLength(0);
+                        }
+                        else
+                        {
+                            // Restaura o MinWidth e distribui todo o espaco entre
+                            // apenas as colunas que continuam visiveis.
+                            customizationHeaderCols[rc].MinWidth = 0;
+                            customizationLadderCols[rc].MinWidth = customizationMinWidths[rc];
+                            double weight = customizationDefaultWidths[rc];
+                            customizationHeaderCols[rc].Width = new GridLength(weight, GridUnitType.Star);
+                            customizationLadderCols[rc].Width = new GridLength(weight, GridUnitType.Star);
+                        }
+                    }
+                };
+                columnsMenu.Items.Add(columnItem);
+            }
+
+            MenuItem indicatorsMenu = new MenuItem { Header = "Indicadores..." };
+            customizationMenu.Items.Add(indicatorsMenu);
+
+            MenuItem quotesMenu = new MenuItem { Header = "BID / LAST / ASK", IsCheckable = true, IsChecked = true };
+            quotesMenu.Click += (s, e) => quotePanel.Visibility = quotesMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+            indicatorsMenu.Items.Add(quotesMenu);
+
+            MenuItem aggressionMenu = new MenuItem { Header = "Saldo de agressão", IsCheckable = true, IsChecked = true };
+            aggressionMenu.Click += (s, e) => aggressionBalanceStatus.Visibility = aggressionMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+            indicatorsMenu.Items.Add(aggressionMenu);
+
+            MenuItem orderStateMenu = new MenuItem { Header = "Estado da ordem", IsCheckable = true, IsChecked = true };
+            orderStateMenu.Click += (s, e) => orderStateStatus.Visibility = orderStateMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+            indicatorsMenu.Items.Add(orderStateMenu);
+
+            MenuItem profileMenu = new MenuItem { Header = "POC / VAH / VAL", IsCheckable = true, IsChecked = true };
+            profileMenu.Click += (s, e) => profileStatus.Visibility = profileMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+            indicatorsMenu.Items.Add(profileMenu);
+
+            MenuItem navigationMenu = new MenuItem { Header = "Controles de navegação", IsCheckable = true, IsChecked = true };
+            navigationMenu.Click += (s, e) => navigationPanel.Visibility = navigationMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+            indicatorsMenu.Items.Add(navigationMenu);
+
+            MenuItem orderButtonsMenu = new MenuItem { Header = "Botões de ordem", IsCheckable = true, IsChecked = true };
+            orderButtonsMenu.Click += (s, e) =>
+            {
+                Visibility v = orderButtonsMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
+                sendPreviewButton.Visibility = v;
+                cancelOrderButton.Visibility = v;
+            };
+            indicatorsMenu.Items.Add(orderButtonsMenu);
+
+            customizationMenu.Items.Add(new Separator());
+
+            MenuItem alwaysOnTopMenu = new MenuItem { Header = "Sempre no topo", IsCheckable = true, IsChecked = Topmost };
+            alwaysOnTopMenu.Click += (s, e) => Topmost = alwaysOnTopMenu.IsChecked;
+            customizationMenu.Items.Add(alwaysOnTopMenu);
+
+            MenuItem restoreMenu = new MenuItem { Header = "Restaurar visual padrão" };
+            restoreMenu.Click += (s, e) =>
+            {
+                for (int c = 0; c < customizationHeaderCols.Length; c++)
+                {
+                    customizationSavedWidths[c] = customizationDefaultWidths[c];
+                    customizationHeaderCols[c].MinWidth = 0;
+                    customizationLadderCols[c].MinWidth = customizationMinWidths[c];
+                    customizationHeaderCols[c].Width = new GridLength(customizationDefaultWidths[c]);
+                    customizationLadderCols[c].Width = new GridLength(customizationDefaultWidths[c]);
+                    if (c < columnsMenu.Items.Count && columnsMenu.Items[c] is MenuItem)
+                        ((MenuItem)columnsMenu.Items[c]).IsChecked = true;
+                }
+
+                quotePanel.Visibility = Visibility.Visible;
+                aggressionBalanceStatus.Visibility = Visibility.Visible;
+                orderStateStatus.Visibility = Visibility.Visible;
+                profileStatus.Visibility = Visibility.Visible;
+                navigationPanel.Visibility = Visibility.Visible;
+                sendPreviewButton.Visibility = Visibility.Visible;
+                cancelOrderButton.Visibility = Visibility.Visible;
+                quotesMenu.IsChecked = true;
+                aggressionMenu.IsChecked = true;
+                orderStateMenu.IsChecked = true;
+                profileMenu.IsChecked = true;
+                navigationMenu.IsChecked = true;
+                orderButtonsMenu.IsChecked = true;
+                Topmost = false;
+                alwaysOnTopMenu.IsChecked = false;
+                ladderOffsetTicks = 0;
+                ladderManualNavigation = false;
+                ladderDisplayCenter = double.NaN;
+                autoCenterMenu.IsChecked = true;
+                UpdateDisplay();
+            };
+            customizationMenu.Items.Add(restoreMenu);
+
+            // Compartilha o mesmo menu nas áreas onde o clique direito não envia ordem.
+            header.ContextMenu = customizationMenu;
+            selectors.ContextMenu = customizationMenu;
+            quotePanel.ContextMenu = customizationMenu;
+            columnHeader.ContextMenu = customizationMenu;
+            statusBorder.ContextMenu = customizationMenu;
+
             return root;
         }
 
@@ -1012,7 +1198,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1024,7 +1210,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (selectedAtm == null)
             {
-                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • SELECIONE UMA ESTRATÉGIA ATM";
+                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • SELECIONE UMA ESTRATÉGIA ATM";
                 UpdateSendButtonState();
                 return;
             }
@@ -1121,7 +1307,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.58 ATM ENTRY NAME FIX • ENVIO SOLICITADO: " + previewOrderSide +
+                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • ENVIO SOLICITADO: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • SUBMIT DIAGNOSTIC • Sim101";
@@ -1140,7 +1326,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.58 ATM ENTRY NAME FIX • ERRO AO ENVIAR: " + ex.Message;
+                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • ERRO AO ENVIAR: " + ex.Message;
 
                 UpdateSendButtonState();
             }
@@ -1185,7 +1371,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1241,7 +1427,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         if (sendPreviewButton != null)
                             sendPreviewButton.IsEnabled = false;
                         connectionStatus.Text =
-                            "V0.9.9.58 ATM ENTRY NAME FIX • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
+                            "V0.9.9.64 RESPONSIVE COLUMNS FIX • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
                         return;
                     }
 
@@ -1270,7 +1456,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = false;
 
                 connectionStatus.Text =
-                    "V0.9.9.58 ATM ENTRY NAME FIX • CANCELANDO " +
+                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • CANCELANDO " +
                     toCancel.Count + " ORDEM(NS) GUARDIANDOM • Sim101";
             }
             catch (Exception ex)
@@ -1285,7 +1471,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.58 ATM ENTRY NAME FIX • ERRO AO CANCELAR: " + ex.Message;
+                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -1371,7 +1557,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.58 ATM ENTRY NAME FIX • STOP " +
+                "V0.9.9.64 RESPONSIVE COLUMNS FIX • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -1451,8 +1637,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.58 ATM ENTRY NAME FIX • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.58 ATM ENTRY NAME FIX • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.64 RESPONSIVE COLUMNS FIX • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.64 RESPONSIVE COLUMNS FIX • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -1461,7 +1647,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -1538,7 +1724,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.58 ATM ENTRY NAME FIX • ORDEM: " + statePt +
+                    "V0.9.9.64 RESPONSIVE COLUMNS FIX • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -1578,7 +1764,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.58 ATM ENTRY NAME FIX • " + previewOrderSide +
+                "V0.9.9.64 RESPONSIVE COLUMNS FIX • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -1637,11 +1823,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
+            connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -2106,7 +2292,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -2169,11 +2355,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.58 ATM ENTRY NAME FIX • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.64 RESPONSIVE COLUMNS FIX • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
