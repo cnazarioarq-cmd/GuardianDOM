@@ -173,6 +173,20 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private BarsRequest historicalFlowRequest;
         private DispatcherTimer depthRefreshTimer;
 
+        // GDOM108 PERFORMANCE - market data is buffered off the UI thread and
+        // consolidated by the existing refresh timer. This avoids one Dispatcher
+        // operation for every market-data event when several DOMs are open.
+        private readonly object pendingMarketSync = new object();
+        private readonly Queue<PendingMarketEvent> pendingMarketEvents = new Queue<PendingMarketEvent>();
+        private struct PendingMarketEvent
+        {
+            public MarketDataType Type;
+            public double Price;
+            public long Volume;
+            public double Bid;
+            public double Ask;
+        }
+
         // Fluxo negociado por preço. Não usa SuperDom.Rows nem MarketDepth.
         // buyFlow = negócios classificados no ASK (agressão compradora).
         // sellFlow = negócios classificados no BID (agressão vendedora).
@@ -2591,6 +2605,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // processamento de mercado continua acumulando todos os negócios,
             // mas perfil + interface são consolidados no timer (10 Hz).
             // Evita redesenhar toda a ladder a cada evento de market data.
+            DrainPendingMarketEvents();
             TrimTimedFlowTrades();
             RefreshDailyProfile();
             RecalculateDailyProfile();
@@ -3365,11 +3380,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
         private void OnMarketData(object sender, MarketDataEventArgs e)
         {
-            double price = e.Price;
-            long volume = e.Volume;
-            MarketDataType type = e.MarketDataType;
-
-            // Captura o inside market diretamente do MarketData.
+            // GDOM108 PERFORMANCE: do not enqueue a Dispatcher callback for every tick.
+            // Capture the event and let the 100 ms UI timer process the batch.
             double eventBid = bidPrice;
             double eventAsk = askPrice;
 
@@ -3377,39 +3389,49 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 if (marketData.Bid != null && marketData.Bid.Price > 0)
                     eventBid = marketData.Bid.Price;
-
                 if (marketData.Ask != null && marketData.Ask.Price > 0)
                     eventAsk = marketData.Ask.Price;
             }
 
-            Dispatcher.BeginInvoke(new Action(() =>
+            PendingMarketEvent pending = new PendingMarketEvent
             {
-                if (currentInstrument == null)
+                Type = e.MarketDataType,
+                Price = e.Price,
+                Volume = e.Volume,
+                Bid = eventBid,
+                Ask = eventAsk
+            };
+
+            lock (pendingMarketSync)
+                pendingMarketEvents.Enqueue(pending);
+        }
+
+        private void DrainPendingMarketEvents()
+        {
+            PendingMarketEvent[] batch;
+            lock (pendingMarketSync)
+            {
+                if (pendingMarketEvents.Count == 0)
                     return;
+                batch = pendingMarketEvents.ToArray();
+                pendingMarketEvents.Clear();
+            }
 
-                if (type == MarketDataType.Bid)
+            for (int i = 0; i < batch.Length; i++)
+            {
+                PendingMarketEvent e = batch[i];
+                if (e.Type == MarketDataType.Bid)
+                    bidPrice = e.Price;
+                else if (e.Type == MarketDataType.Ask)
+                    askPrice = e.Price;
+                else if (e.Type == MarketDataType.Last)
                 {
-                    bidPrice = price;
+                    lastPrice = e.Price;
+                    if (e.Bid > 0) bidPrice = e.Bid;
+                    if (e.Ask > 0) askPrice = e.Ask;
+                    AccumulateTrade(e.Price, e.Volume, e.Ask, e.Bid);
                 }
-                else if (type == MarketDataType.Ask)
-                {
-                    askPrice = price;
-                }
-                else if (type == MarketDataType.Last)
-                {
-                    lastPrice = price;
-
-                    if (eventBid > 0)
-                        bidPrice = eventBid;
-                    if (eventAsk > 0)
-                        askPrice = eventAsk;
-
-                    AccumulateTrade(price, volume, eventAsk, eventBid);
-                }
-
-                // V0.9.9.40: sem UpdateDisplay() por evento.
-                // A interface é atualizada pelo timer de 100 ms.
-            }));
+            }
         }
 
         private void AccumulateTrade(double price, long volume, double ask, double bid)
