@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -154,6 +155,19 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private string startupInstrumentName = string.Empty;
 
         private Instrument currentInstrument;
+
+        // V0.9.9.94 - vínculo de ativo entre janelas Guardian DOM.
+        // Janelas com a mesma cor acompanham a troca de ativo umas das outras.
+        private static readonly object guardianLinkSync = new object();
+        private static readonly List<GuardianDomWindow> guardianLinkWindows = new List<GuardianDomWindow>();
+        private string instrumentLinkGroup = "Nenhum";
+        private bool receivingLinkedInstrument;
+
+        // V0.9.9.95 - botão visual de vínculo ao lado do Minimizar.
+        private Button titleInstrumentLinkButton;
+        private Button titleDuplicateWindowButton;
+        private Popup titleInstrumentLinkPopup;
+        private bool titleButtonsInstalled;
         private MarketData marketData;
         private BarsRequest historicalProfileRequest;
         private BarsRequest historicalFlowRequest;
@@ -288,7 +302,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private double ladderDisplayCenter = double.NaN;
         private const int AutoCenterEdgeRows = 5;
 
-        // V0.9.9.93 - integra "Janela Duplicar" ao menu nativo da barra de titulo.
+        // V0.9.9.94 - integra "Janela Duplicar" ao menu nativo da barra de titulo.
         private const int GuardianDuplicateWindowCommand = 0x1F10;
         private HwndSource guardianHwndSource;
 
@@ -323,6 +337,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             LoadLadderBackgroundColor();
             startupInstrumentName = ReadLastInstrumentName();
+            instrumentLinkGroup = ReadInstrumentLinkGroup();
+            lock (guardianLinkSync)
+            {
+                if (!guardianLinkWindows.Contains(this))
+                    guardianLinkWindows.Add(this);
+            }
+
             Content = BuildInterface();
 
             // V0.9.9.88 - persistencia explicita do ultimo ativo.
@@ -330,6 +351,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // so comeca depois que a janela terminou de carregar. Isso evita depender
             // do LastUsedGroup do InstrumentSelector.
             Loaded += GuardianDomWindow_LoadedRestoreInstrument;
+            Loaded += GuardianDomWindow_LoadedInstallTitleLink;
 
 
             depthRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -357,7 +379,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 IntPtr systemMenu = GetSystemMenu(hwnd, false);
                 if (systemMenu != IntPtr.Zero)
                 {
-                    // V0.9.9.93 - adiciona ao menu de sistema REAL da janela.
+                    // V0.9.9.94 - adiciona ao menu de sistema REAL da janela.
                     // AppendMenu evita depender das posições internas que o NinjaTrader/WPF
                     // pode reconstruir depois de SourceInitialized.
                     AppendMenu(systemMenu, MF_SEPARATOR, UIntPtr.Zero, string.Empty);
@@ -397,6 +419,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 try
                 {
+                    duplicate.instrumentLinkGroup = instrumentLinkGroup;
+                    duplicate.SaveInstrumentLinkGroup();
+
                     duplicate.selectedPeriodMinutes = periodMinutes;
                     if (duplicate.periodSelector != null)
                     {
@@ -1082,7 +1107,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.93 JANELA DUPLICAR • ENVIO SOMENTE Sim101",
+                Text = "V0.9.9.94 JANELA DUPLICAR • ENVIO SOMENTE Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -1297,13 +1322,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // do GuardianDOM (cabeçalho, seletores, cotações, cabeçalho das colunas e status).
             ContextMenu customizationMenu = new ContextMenu();
 
-            // V0.9.9.93 - duplicação funcional da janela.
+            // V0.9.9.94 - duplicação funcional da janela.
             // O NTWindow customizado não expõe automaticamente o comando nativo de
             // duplicação usado pelo Chart/SuperDOM, então disponibilizamos a mesma
             // ação no menu de contexto do próprio Guardian DOM.
             MenuItem duplicateWindowMenu = new MenuItem { Header = "Janela Duplicar" };
             duplicateWindowMenu.Click += (s, e) => DuplicateGuardianDomWindow();
             customizationMenu.Items.Add(duplicateWindowMenu);
+            customizationMenu.Items.Add(new Separator());
+
+            customizationMenu.Items.Add(CreateInstrumentLinkMenu());
             customizationMenu.Items.Add(new Separator());
 
             MenuItem autoCenterMenu = new MenuItem { Header = "Centro automático", IsCheckable = true, IsChecked = !ladderManualNavigation };
@@ -2547,6 +2575,346 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 SaveLastInstrument(selected);
 
             ChangeInstrument(selected);
+
+            if (selected != null && !receivingLinkedInstrument)
+                PropagateGuardianInstrument(selected);
+        }
+
+        // V0.9.9.94 - sincroniza apenas o ATIVO entre Guardian DOMs da mesma cor.
+        private void PropagateGuardianInstrument(Instrument instrument)
+        {
+            if (instrument == null || string.IsNullOrWhiteSpace(instrumentLinkGroup) ||
+                string.Equals(instrumentLinkGroup, "Nenhum", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            List<GuardianDomWindow> targets;
+            lock (guardianLinkSync)
+                targets = new List<GuardianDomWindow>(guardianLinkWindows);
+
+            foreach (GuardianDomWindow target in targets)
+            {
+                if (target == null || ReferenceEquals(target, this) ||
+                    !string.Equals(target.instrumentLinkGroup, instrumentLinkGroup, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                target.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        if (target.instrumentSelector == null)
+                            return;
+
+                        Instrument current = target.instrumentSelector.Instrument;
+                        if (current != null && string.Equals(current.FullName, instrument.FullName, StringComparison.OrdinalIgnoreCase))
+                            return;
+
+                        target.receivingLinkedInstrument = true;
+                        target.startupInstrumentName = instrument.FullName;
+                        target.instrumentSelector.Instrument = instrument;
+                    }
+                    finally
+                    {
+                        target.receivingLinkedInstrument = false;
+                    }
+                }));
+            }
+        }
+
+        private string GetInstrumentLinkPath()
+        {
+            try { return Path.Combine(NinjaTrader.Core.Globals.UserDataDir, "GuardianDOM_InstrumentLink.txt"); }
+            catch { return string.Empty; }
+        }
+
+        private string ReadInstrumentLinkGroup()
+        {
+            try
+            {
+                string path = GetInstrumentLinkPath();
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                {
+                    string value = File.ReadAllText(path).Trim();
+                    if (!string.IsNullOrWhiteSpace(value))
+                        return value;
+                }
+            }
+            catch { }
+            return "Nenhum";
+        }
+
+        private void SaveInstrumentLinkGroup()
+        {
+            try
+            {
+                string path = GetInstrumentLinkPath();
+                if (!string.IsNullOrEmpty(path))
+                    File.WriteAllText(path, instrumentLinkGroup ?? "Nenhum");
+            }
+            catch { }
+        }
+
+        private Brush GuardianLinkBrush(string name)
+        {
+            switch (name)
+            {
+                case "Vermelho": return Brushes.Red;
+                case "Laranja": return Brushes.Orange;
+                case "Amarelo": return Brushes.Yellow;
+                case "Ouro": return Brushes.Gold;
+                case "Lima": return Brushes.Lime;
+                case "Verde": return Brushes.Green;
+                case "Aqua": return Brushes.Aqua;
+                case "Azul": return Brushes.Blue;
+                case "Dodger": return Brushes.DodgerBlue;
+                case "Violeta": return Brushes.Violet;
+                case "Roxo": return Brushes.Purple;
+                case "Rosa": return Brushes.Pink;
+                default: return Brushes.Transparent;
+            }
+        }
+
+        private void GuardianDomWindow_LoadedInstallTitleLink(object sender, RoutedEventArgs e)
+        {
+            // V0.9.9.102 - tenta instalar imediatamente no Loaded.
+            // Se o template nativo ainda estiver concluindo o primeiro layout, a própria
+            // rotina agenda uma nova tentativa em prioridade Render (antes de Idle).
+            try { InstallTitleInstrumentLinkButton(); }
+            catch { }
+        }
+
+        private FrameworkElement FindMinimizeTitleElement(DependencyObject root)
+        {
+            if (root == null)
+                return null;
+
+            FrameworkElement fe = root as FrameworkElement;
+            if (fe != null)
+            {
+                string name = fe.Name ?? string.Empty;
+                string tip = fe.ToolTip != null ? fe.ToolTip.ToString() : string.Empty;
+                string content = string.Empty;
+                ContentControl cc = fe as ContentControl;
+                if (cc != null && cc.Content != null)
+                    content = cc.Content.ToString();
+
+                string probe = (name + " " + tip + " " + content).ToLowerInvariant();
+                if (probe.Contains("minimiz") || probe.Contains("minimize"))
+                    return fe;
+            }
+
+            int count = 0;
+            try { count = VisualTreeHelper.GetChildrenCount(root); }
+            catch { return null; }
+
+            for (int i = 0; i < count; i++)
+            {
+                DependencyObject child = VisualTreeHelper.GetChild(root, i);
+                FrameworkElement found = FindMinimizeTitleElement(child);
+                if (found != null)
+                    return found;
+            }
+            return null;
+        }
+
+        private Panel FindNativeTitleButtonHost(FrameworkElement minimizeElement)
+        {
+            if (minimizeElement == null)
+                return null;
+
+            DependencyObject current = minimizeElement;
+            while (current != null && !ReferenceEquals(current, this))
+            {
+                DependencyObject parent = null;
+                try { parent = VisualTreeHelper.GetParent(current); }
+                catch { parent = null; }
+
+                Panel panel = parent as Panel;
+                if (panel != null && current is UIElement && panel.Children.Contains((UIElement)current))
+                    return panel;
+
+                current = parent;
+            }
+            return null;
+        }
+
+        private void InstallTitleInstrumentLinkButton()
+        {
+            if (titleButtonsInstalled)
+                return;
+
+            FrameworkElement minimizeElement = FindMinimizeTitleElement(this);
+            Panel titleHost = FindNativeTitleButtonHost(minimizeElement);
+            if (minimizeElement == null || titleHost == null)
+            {
+                // V0.9.9.102 - não espera ContextIdle. Render ocorre durante a
+                // montagem visual inicial da janela, fazendo os botões aparecerem junto
+                // dos controles nativos assim que o host da barra estiver disponível.
+                Dispatcher.BeginInvoke(DispatcherPriority.Render, new Action(() =>
+                {
+                    try
+                    {
+                        if (!titleButtonsInstalled)
+                            InstallTitleInstrumentLinkButton();
+                    }
+                    catch { }
+                }));
+                return;
+            }
+
+            Button nativeTitleButton = minimizeElement as Button;
+            double nativeButtonWidth = minimizeElement.ActualWidth > 0 ? minimizeElement.ActualWidth : 18;
+            double nativeButtonHeight = minimizeElement.ActualHeight > 0 ? minimizeElement.ActualHeight : 18;
+
+            titleInstrumentLinkButton = new Button
+            {
+                Width = nativeButtonWidth,
+                Height = nativeButtonHeight,
+                MinWidth = 0,
+                MinHeight = 0,
+                MaxWidth = nativeButtonWidth,
+                MaxHeight = nativeButtonHeight,
+                Padding = new Thickness(0),
+                Margin = new Thickness(0, 0, 3, 0),
+                ToolTip = "Vincular ativo",
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            // V0.9.9.101 - NÃO herda o Style do botão nativo no botão de vínculo.
+            // O template nativo do NT força o Background e impedia a cor escolhida
+            // de preencher a superfície do botão. Mantemos tamanho/alinhamento nativos,
+            // mas o fundo deste botão fica sob controle do GuardianDOM.
+            titleInstrumentLinkButton.Click += (s, e) =>
+            {
+                System.Windows.Controls.ContextMenu menu = new System.Windows.Controls.ContextMenu();
+                menu.Items.Add(CreateInstrumentLinkMenu());
+                menu.PlacementTarget = titleInstrumentLinkButton;
+                menu.Placement = PlacementMode.Bottom;
+                menu.IsOpen = true;
+                e.Handled = true;
+            };
+
+            UpdateTitleInstrumentLinkButton();
+
+            titleDuplicateWindowButton = new Button
+            {
+                Content = "⧉",
+                Width = nativeButtonWidth,
+                Height = nativeButtonHeight,
+                MinWidth = 0,
+                MinHeight = 0,
+                MaxWidth = nativeButtonWidth,
+                MaxHeight = nativeButtonHeight,
+                Padding = new Thickness(0),
+                Margin = new Thickness(0, 0, 3, 0),
+                Foreground = Brushes.WhiteSmoke,
+                FontSize = 14,
+                FontWeight = FontWeights.Normal,
+                ToolTip = "Janela Duplicar",
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            if (nativeTitleButton != null)
+                titleDuplicateWindowButton.Style = nativeTitleButton.Style;
+            titleDuplicateWindowButton.Click += (s, e) =>
+            {
+                DuplicateGuardianDomWindow();
+                e.Handled = true;
+            };
+
+            StackPanel titleButtonsPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0)
+            };
+            titleButtonsPanel.Children.Add(titleDuplicateWindowButton);
+            titleButtonsPanel.Children.Add(titleInstrumentLinkButton);
+
+            int minimizeIndex = titleHost.Children.IndexOf(minimizeElement);
+            if (minimizeIndex < 0)
+                return;
+
+            // Faz os dois controles participarem da própria árvore visual da barra
+            // de título do NTWindow. Não usa Popup/overlay.
+            titleHost.Children.Insert(minimizeIndex, titleButtonsPanel);
+            titleButtonsInstalled = true;
+        }
+
+        private void UpdateTitleInstrumentLinkButton()
+        {
+            if (titleInstrumentLinkButton == null)
+                return;
+
+            Brush linkBrush = GuardianLinkBrush(instrumentLinkGroup);
+            bool linked = !string.Equals(instrumentLinkGroup, "Nenhum", StringComparison.OrdinalIgnoreCase);
+
+            // V0.9.9.100 - a cor ocupa o próprio botão de vínculo.
+            // Não desenha mais um quadradinho dentro do botão.
+            titleInstrumentLinkButton.Content = null;
+            titleInstrumentLinkButton.Background = linked ? linkBrush : new SolidColorBrush(Color.FromRgb(38, 38, 40));
+            titleInstrumentLinkButton.BorderBrush = linked ? new SolidColorBrush(Color.FromRgb(125, 125, 125)) : new SolidColorBrush(Color.FromRgb(105, 105, 105));
+            titleInstrumentLinkButton.BorderThickness = new Thickness(1);
+            titleInstrumentLinkButton.Opacity = 1.0;
+            titleInstrumentLinkButton.ToolTip = linked
+                ? "Vincular ativo: " + instrumentLinkGroup
+                : "Vincular ativo: Nenhum";
+        }
+
+        private MenuItem CreateInstrumentLinkMenu()
+        {
+            MenuItem root = new MenuItem { Header = "Vincular ativo" };
+            string[] groups = new string[]
+            {
+                "Nenhum", "Vermelho", "Laranja", "Amarelo", "Ouro", "Lima",
+                "Verde", "Aqua", "Azul", "Dodger", "Violeta", "Roxo", "Rosa"
+            };
+
+            foreach (string group in groups)
+            {
+                MenuItem item = new MenuItem
+                {
+                    Header = group,
+                    IsCheckable = true,
+                    IsChecked = string.Equals(instrumentLinkGroup, group, StringComparison.OrdinalIgnoreCase)
+                };
+
+                if (!string.Equals(group, "Nenhum", StringComparison.OrdinalIgnoreCase))
+                {
+                    Border swatch = new Border
+                    {
+                        Width = 11,
+                        Height = 11,
+                        Background = GuardianLinkBrush(group),
+                        BorderBrush = Brushes.Gray,
+                        BorderThickness = new Thickness(1)
+                    };
+                    item.Icon = swatch;
+                }
+
+                string selectedGroup = group;
+                item.Click += (s, e) =>
+                {
+                    instrumentLinkGroup = selectedGroup;
+                    SaveInstrumentLinkGroup();
+                    UpdateTitleInstrumentLinkButton();
+
+                    foreach (object child in root.Items)
+                    {
+                        MenuItem mi = child as MenuItem;
+                        if (mi != null)
+                            mi.IsChecked = string.Equals(mi.Header as string, selectedGroup, StringComparison.OrdinalIgnoreCase);
+                    }
+
+                    // Ao entrar em um grupo, publica imediatamente o ativo atual.
+                    if (currentInstrument != null &&
+                        !string.Equals(selectedGroup, "Nenhum", StringComparison.OrdinalIgnoreCase))
+                        PropagateGuardianInstrument(currentInstrument);
+                };
+
+                root.Items.Add(item);
+            }
+            return root;
         }
 
         // V0.9.9.83 - persistencia simples e independente do ultimo ativo.
@@ -2750,7 +3118,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
         // V0.9.9.22: carrega o historico de negocios de 1 tick do dia.
         // Isso permite iniciar POC/VAH/VAL sem esperar a janela acumular do zero.
-        // V0.9.9.93 - pré-carrega o fluxo do período escolhido com ticks históricos.
+        // V0.9.9.94 - pré-carrega o fluxo do período escolhido com ticks históricos.
         // A classificação usa o movimento entre ticks (uptick/downtick) como aproximação
         // histórica do agressor, pois o BarsRequest de 1 tick não traz o Bid/Ask histórico.
         private void LoadHistoricalFlowForPeriod()
@@ -3902,6 +4270,21 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private void GuardianDomWindow_Closed(object sender, EventArgs e)
         {
             Closed -= GuardianDomWindow_Closed;
+
+            try
+            {
+                if (titleInstrumentLinkPopup != null)
+                {
+                    titleInstrumentLinkPopup.IsOpen = false;
+                    titleInstrumentLinkPopup.Child = null;
+                    titleInstrumentLinkPopup = null;
+                }
+                titleInstrumentLinkButton = null;
+            }
+            catch { }
+
+            lock (guardianLinkSync)
+                guardianLinkWindows.Remove(this);
 
             if (guardianHwndSource != null)
             {
