@@ -128,6 +128,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private NinjaTrader.Gui.NinjaScript.AtmStrategy.AtmStrategySelector atmStrategySelector;
         private System.Windows.Threading.DispatcherTimer atmDiagTimer;
         private NinjaTrader.NinjaScript.AtmStrategy lastAutoQtyAtm;
+        // V0.9.9.84 - retry controlado para restaurar o ultimo ativo somente depois que o seletor estiver pronto.
+        private DispatcherTimer lastInstrumentRestoreTimer;
+        private int lastInstrumentRestoreAttempts = 0;
+        // V0.9.9.86 - exige estabilidade por varios ciclos porque o InstrumentSelector
+        // pode aceitar o ativo e depois ser resetado para "Selecionar" durante a inicializacao interna.
+        private int lastInstrumentRestoreStableTicks = 0;
+        private static string lastInstrumentSessionName = string.Empty;
+        private string startupInstrumentName = string.Empty;
 
         private Instrument currentInstrument;
         private MarketData marketData;
@@ -224,6 +232,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private Grid[] sellFlowGrids;
         private Border[] buyFlowBars;
         private Border[] sellFlowBars;
+        private Border[] buyImbalanceBorders;
+        private Border[] sellImbalanceBorders;
         private TextBlock[] volumeCells;
         private Border[] volumeBorders;
         private Grid[] volumeGrids;
@@ -249,6 +259,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private int ladderOffsetTicks = 0;
         private bool ladderManualNavigation = false;
 
+        // V0.9.9.82 - imbalance DIAGONAL 3x por BORDA na célula de agressão.
+        // Regra inicial conservadora: lado dominante >= 3x o lado oposto
+        // e pelo menos 20 contratos no lado dominante.
+        private bool imbalanceEnabled = true;
+        private const double ImbalanceRatio = 3.0;
+        private const long ImbalanceMinVolume = 20;
+
         // V0.9.9.43 - centro visual persistente da ladder.
         // Em AUTO, só é deslocado quando o mercado chega perto das bordas.
         private double ladderDisplayCenter = double.NaN;
@@ -268,7 +285,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Background = new SolidColorBrush(Color.FromRgb(20, 25, 31));
 
             LoadLadderBackgroundColor();
+            startupInstrumentName = ReadLastInstrumentName();
             Content = BuildInterface();
+
+            // V0.9.9.88 - persistencia explicita do ultimo ativo.
+            // O nome e salvo em GuardianDOM_LastInstrument.txt e a restauracao manual
+            // so comeca depois que a janela terminou de carregar. Isso evita depender
+            // do LastUsedGroup do InstrumentSelector.
+            Loaded += GuardianDomWindow_LoadedRestoreInstrument;
 
             depthRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
@@ -331,6 +355,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 Margin = new Thickness(0, 4, 4, 0)
             };
+
             instrumentSelector.InstrumentChanged += OnInstrumentChanged;
             instrumentPanel.Children.Add(instrumentSelector);
             Grid.SetColumn(instrumentPanel, 0);
@@ -633,6 +658,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             sellFlowGrids = new Grid[LadderRows];
             buyFlowBars = new Border[LadderRows];
             sellFlowBars = new Border[LadderRows];
+            buyImbalanceBorders = new Border[LadderRows];
+            sellImbalanceBorders = new Border[LadderRows];
             volumeCells = new TextBlock[LadderRows];
             volumeBorders = new Border[LadderRows];
             volumeGrids = new Grid[LadderRows];
@@ -686,8 +713,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     HorizontalAlignment = HorizontalAlignment.Right,
                     Width = 0
                 };
+                buyImbalanceBorders[i] = new Border
+                {
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(255, 185, 35)),
+                    BorderThickness = new Thickness(0),
+                    Margin = new Thickness(1),
+                    IsHitTestVisible = false
+                };
                 buyFlowGrids[i].Children.Add(buyFlowBars[i]);
                 buyFlowGrids[i].Children.Add(bidCells[i]);
+                buyFlowGrids[i].Children.Add(buyImbalanceBorders[i]);
                 bidBorders[i].Child = buyFlowGrids[i];
                 bidBorders[i].Background = LadderBaseBrush;
 
@@ -700,8 +735,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     HorizontalAlignment = HorizontalAlignment.Left,
                     Width = 0
                 };
+                sellImbalanceBorders[i] = new Border
+                {
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(255, 185, 35)),
+                    BorderThickness = new Thickness(0),
+                    Margin = new Thickness(1),
+                    IsHitTestVisible = false
+                };
                 sellFlowGrids[i].Children.Add(sellFlowBars[i]);
                 sellFlowGrids[i].Children.Add(askCells[i]);
+                sellFlowGrids[i].Children.Add(sellImbalanceBorders[i]);
                 askBorders[i].Child = sellFlowGrids[i];
                 askBorders[i].Background = LadderBaseBrush;
 
@@ -871,7 +914,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.79 COLUMN ORDER SAVE • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101",
+                Text = "V0.9.9.88 FILE LAST INSTRUMENT • ENVIO SOMENTE Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -1178,6 +1221,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             MenuItem aggressionMenu = new MenuItem { Header = "Saldo de agressão", IsCheckable = true, IsChecked = true };
             aggressionMenu.Click += (s, e) => aggressionBalanceStatus.Visibility = aggressionMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
             indicatorsMenu.Items.Add(aggressionMenu);
+
+            // V0.9.9.80 - liga/desliga o destaque visual de imbalance sem alterar
+            // os dados, histogramas ou a lógica de envio de ordens.
+            MenuItem imbalanceMenu = new MenuItem { Header = "Imbalance diagonal 3x (mín. 20)", IsCheckable = true, IsChecked = imbalanceEnabled };
+            imbalanceMenu.Click += (s, e) =>
+            {
+                imbalanceEnabled = imbalanceMenu.IsChecked;
+                UpdateDisplay();
+            };
+            indicatorsMenu.Items.Add(imbalanceMenu);
 
             MenuItem orderStateMenu = new MenuItem { Header = "Estado da ordem", IsCheckable = true, IsChecked = true };
             orderStateMenu.Click += (s, e) => orderStateStatus.Visibility = orderStateMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
@@ -1572,7 +1625,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1583,7 +1636,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 atmStrategySelector == null ? null : atmStrategySelector.SelectedAtmStrategy;
             if (selectedAtm == null)
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • SELECIONE UMA ESTRATÉGIA ATM";
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • SELECIONE UMA ESTRATÉGIA ATM";
                 return;
             }
 
@@ -1632,14 +1685,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     orderStateStatus.Text = "ORDEM: " + (buy ? "COMPRA" : "VENDA") + " MERCADO • ENVIO SOLICITADO";
                     orderStateStatus.Foreground = Brushes.Gold;
                 }
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • " +
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • " +
                     (buy ? "COMPRA" : "VENDA") + " MERCADO " + quantity + " • ATM • Sim101";
             }
             catch (Exception ex)
             {
                 guardianSubmittedOrder = null;
                 guardianOrderStatus = "ERRO";
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • ERRO AO ENVIAR MERCADO: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • ERRO AO ENVIAR MERCADO: " + ex.Message;
             }
         }
 
@@ -1651,7 +1704,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
             if (currentInstrument == null)
@@ -1666,12 +1719,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     orderStateStatus.Text = "ORDEM: FECHAMENTO SOLICITADO";
                     orderStateStatus.Foreground = Brushes.Gold;
                 }
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • FECHAMENTO SOLICITADO • " +
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • FECHAMENTO SOLICITADO • " +
                     currentInstrument.FullName + " • Sim101";
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • ERRO NO FECHAMENTO: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • ERRO NO FECHAMENTO: " + ex.Message;
             }
         }
 
@@ -1683,7 +1736,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1695,7 +1748,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (selectedAtm == null)
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • SELECIONE UMA ESTRATÉGIA ATM";
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • SELECIONE UMA ESTRATÉGIA ATM";
                 UpdateSendButtonState();
                 return;
             }
@@ -1792,7 +1845,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.74 RGB PLUS MINUS • ENVIO SOLICITADO: " + previewOrderSide +
+                    "V0.9.9.85 LAST INSTRUMENT • ENVIO SOLICITADO: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • SUBMIT DIAGNOSTIC • Sim101";
@@ -1811,7 +1864,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.74 RGB PLUS MINUS • ERRO AO ENVIAR: " + ex.Message;
+                    "V0.9.9.85 LAST INSTRUMENT • ERRO AO ENVIAR: " + ex.Message;
 
                 UpdateSendButtonState();
             }
@@ -1856,7 +1909,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1912,7 +1965,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         if (sendPreviewButton != null)
                             sendPreviewButton.IsEnabled = false;
                         connectionStatus.Text =
-                            "V0.9.9.74 RGB PLUS MINUS • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
+                            "V0.9.9.85 LAST INSTRUMENT • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
                         return;
                     }
 
@@ -1941,7 +1994,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = false;
 
                 connectionStatus.Text =
-                    "V0.9.9.74 RGB PLUS MINUS • CANCELANDO " +
+                    "V0.9.9.85 LAST INSTRUMENT • CANCELANDO " +
                     toCancel.Count + " ORDEM(NS) GUARDIANDOM • Sim101";
             }
             catch (Exception ex)
@@ -1956,7 +2009,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.74 RGB PLUS MINUS • ERRO AO CANCELAR: " + ex.Message;
+                    "V0.9.9.85 LAST INSTRUMENT • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -2042,7 +2095,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.74 RGB PLUS MINUS • STOP " +
+                "V0.9.9.85 LAST INSTRUMENT • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -2122,8 +2175,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.74 RGB PLUS MINUS • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.74 RGB PLUS MINUS • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.85 LAST INSTRUMENT • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.85 LAST INSTRUMENT • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -2132,7 +2185,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -2209,7 +2262,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.74 RGB PLUS MINUS • ORDEM: " + statePt +
+                    "V0.9.9.85 LAST INSTRUMENT • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -2249,7 +2302,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.74 RGB PLUS MINUS • " + previewOrderSide +
+                "V0.9.9.85 LAST INSTRUMENT • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -2273,7 +2326,156 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private void OnInstrumentChanged(object sender, EventArgs e)
         {
             Instrument selected = instrumentSelector != null ? instrumentSelector.Instrument : null;
+
+            // V0.9.9.83 - grava somente selecoes validas.
+            // Assim, fechar/reabrir a janela nao substitui o ultimo ativo por "Selecionar".
+            if (selected != null)
+                SaveLastInstrument(selected);
+
             ChangeInstrument(selected);
+        }
+
+        // V0.9.9.83 - persistencia simples e independente do ultimo ativo.
+        // Segue o mesmo padrao dos arquivos de preferencias ja usados pelo DOM.
+        private string GetLastInstrumentPath()
+        {
+            try { return Path.Combine(NinjaTrader.Core.Globals.UserDataDir, "GuardianDOM_LastInstrument.txt"); }
+            catch { return string.Empty; }
+        }
+
+        private string ReadLastInstrumentName()
+        {
+            if (!string.IsNullOrWhiteSpace(lastInstrumentSessionName))
+                return lastInstrumentSessionName;
+
+            try
+            {
+                string path = GetLastInstrumentPath();
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                {
+                    string name = File.ReadAllText(path).Trim();
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        lastInstrumentSessionName = name;
+                        return name;
+                    }
+                }
+            }
+            catch { }
+
+            return string.Empty;
+        }
+
+        private void SaveLastInstrument(Instrument instrument)
+        {
+            if (instrument == null || string.IsNullOrWhiteSpace(instrument.FullName))
+                return;
+
+            lastInstrumentSessionName = instrument.FullName;
+            startupInstrumentName = instrument.FullName;
+
+            try
+            {
+                string path = GetLastInstrumentPath();
+                if (!string.IsNullOrEmpty(path))
+                    File.WriteAllText(path, instrument.FullName);
+            }
+            catch
+            {
+                // A copia em memoria continua disponivel mesmo se a gravacao em disco falhar.
+            }
+        }
+
+        private void GuardianDomWindow_LoadedRestoreInstrument(object sender, RoutedEventArgs e)
+        {
+            Loaded -= GuardianDomWindow_LoadedRestoreInstrument;
+
+            // Agenda depois do Loaded para deixar o InstrumentSelector terminar
+            // a inicializacao interna antes da primeira atribuicao.
+            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                StartLastInstrumentRestore();
+            }));
+        }
+
+        private void StartLastInstrumentRestore()
+        {
+            if (instrumentSelector == null)
+                return;
+
+            lastInstrumentRestoreAttempts = 0;
+            lastInstrumentRestoreStableTicks = 0;
+
+            if (lastInstrumentRestoreTimer != null)
+            {
+                lastInstrumentRestoreTimer.Stop();
+                lastInstrumentRestoreTimer.Tick -= LastInstrumentRestoreTimer_Tick;
+            }
+
+            lastInstrumentRestoreTimer = new DispatcherTimer(DispatcherPriority.Loaded)
+            {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+            lastInstrumentRestoreTimer.Tick += LastInstrumentRestoreTimer_Tick;
+
+            // V0.9.9.86 - nao encerramos na primeira atribuicao bem-sucedida.
+            // O NinjaTrader pode sobrescrever o InstrumentSelector alguns instantes depois.
+            // Fazemos a primeira tentativa agora e mantemos o timer ate o ativo permanecer
+            // correto por varios ciclos consecutivos.
+            TryLoadLastInstrument();
+            lastInstrumentRestoreTimer.Start();
+        }
+
+        private void LastInstrumentRestoreTimer_Tick(object sender, EventArgs e)
+        {
+            lastInstrumentRestoreAttempts++;
+
+            bool restored = TryLoadLastInstrument();
+            if (restored)
+                lastInstrumentRestoreStableTicks++;
+            else
+                lastInstrumentRestoreStableTicks = 0;
+
+            // Considera restaurado somente depois de 8 ciclos consecutivos (aprox. 2 s).
+            // Isso atravessa o periodo em que o InstrumentSelector costuma se reinicializar.
+            if (lastInstrumentRestoreStableTicks >= 8 || lastInstrumentRestoreAttempts >= 40)
+            {
+                lastInstrumentRestoreTimer.Stop();
+                lastInstrumentRestoreTimer.Tick -= LastInstrumentRestoreTimer_Tick;
+                lastInstrumentRestoreTimer = null;
+            }
+        }
+
+        private bool TryLoadLastInstrument()
+        {
+            if (instrumentSelector == null)
+                return false;
+
+            try
+            {
+                string instrumentName = ReadLastInstrumentName();
+                if (string.IsNullOrWhiteSpace(instrumentName))
+                    return true;
+
+                // Se o seletor ja esta exatamente no ativo salvo, terminou.
+                Instrument current = instrumentSelector.Instrument;
+                if (current != null && string.Equals(current.FullName, instrumentName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                Instrument savedInstrument = Instrument.GetInstrument(instrumentName);
+                if (savedInstrument == null)
+                    return false;
+
+                instrumentSelector.Instrument = savedInstrument;
+
+                // Confirma no proprio seletor. Se o Ninja ainda nao aceitou, o timer tenta novamente.
+                current = instrumentSelector.Instrument;
+                return current != null && string.Equals(current.FullName, savedInstrument.FullName, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void ChangeInstrument(Instrument newInstrument)
@@ -2308,11 +2510,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
+            connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -2777,7 +2979,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -2898,11 +3100,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.74 RGB PLUS MINUS • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
@@ -3204,6 +3406,30 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                     priceCells[row].FontWeight = FontWeights.Normal;
                 }
+
+                // V0.9.9.82 - IMBALANCE DIAGONAL 3x por BORDA.
+                // Footprint clássico:
+                //   COMPRA (ASK) neste preço x VENDA (BID) 1 tick ABAIXO.
+                //   VENDA  (BID) neste preço x COMPRA (ASK) 1 tick ACIMA.
+                // A borda âmbar não altera o fundo/histograma nem a linha do LAST.
+                double lowerPrice = currentInstrument.MasterInstrument.RoundToTickSize(levelPrice - tickSize);
+                double upperPrice = currentInstrument.MasterInstrument.RoundToTickSize(levelPrice + tickSize);
+                long diagonalSellBelow = 0;
+                long diagonalBuyAbove = 0;
+                sellFlow.TryGetValue(lowerPrice, out diagonalSellBelow);
+                buyFlow.TryGetValue(upperPrice, out diagonalBuyAbove);
+
+                bool buyImbalance = imbalanceEnabled && buyVolume >= ImbalanceMinVolume &&
+                    (diagonalSellBelow == 0 || (double)buyVolume >= (double)diagonalSellBelow * ImbalanceRatio);
+                bool sellImbalance = imbalanceEnabled && sellVolume >= ImbalanceMinVolume &&
+                    (diagonalBuyAbove == 0 || (double)sellVolume >= (double)diagonalBuyAbove * ImbalanceRatio);
+
+                buyImbalanceBorders[row].BorderThickness = buyImbalance ? new Thickness(2) : new Thickness(0);
+                sellImbalanceBorders[row].BorderThickness = sellImbalance ? new Thickness(2) : new Thickness(0);
+
+                // Texto volta ao padrão: a indicação do imbalance agora é exclusivamente a borda.
+                bidCells[row].FontWeight = FontWeights.Normal;
+                askCells[row].FontWeight = FontWeights.Normal;
             }
 
             UpdateOrderPreviewVisual();
@@ -3255,6 +3481,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 bidBorders[i].Background = LadderBaseBrush;
+                if (buyImbalanceBorders != null && buyImbalanceBorders[i] != null) buyImbalanceBorders[i].BorderThickness = new Thickness(0);
+                if (sellImbalanceBorders != null && sellImbalanceBorders[i] != null) sellImbalanceBorders[i].BorderThickness = new Thickness(0);
                 priceBorders[i].Background = new SolidColorBrush(Color.FromRgb(62, 62, 65));
                 askBorders[i].Background = LadderBaseBrush;
 
@@ -3302,8 +3530,20 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 depthRefreshTimer = null;
             }
 
+            if (instrumentSelector != null && instrumentSelector.Instrument != null)
+                SaveLastInstrument(instrumentSelector.Instrument);
+
             if (instrumentSelector != null)
+            {
+                if (lastInstrumentRestoreTimer != null)
+                {
+                    lastInstrumentRestoreTimer.Stop();
+                    lastInstrumentRestoreTimer.Tick -= LastInstrumentRestoreTimer_Tick;
+                    lastInstrumentRestoreTimer = null;
+                }
+
                 instrumentSelector.InstrumentChanged -= OnInstrumentChanged;
+            }
 
             if (atmDiagTimer != null)
             {
