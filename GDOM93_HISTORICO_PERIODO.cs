@@ -7,6 +7,8 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Interop;
+using System.Runtime.InteropServices;
 using System.Windows.Threading;
 
 using NinjaTrader.Cbi;
@@ -125,6 +127,20 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private InstrumentSelector instrumentSelector;
         private AccountSelector accountSelector;
         private QuantityUpDown quantitySelector;
+
+        // V0.9.9.89 - período do fluxo exibido no DOM.
+        private ComboBox periodSelector;
+        private int selectedPeriodMinutes = 30;
+        private readonly Queue<TimedFlowTrade> timedFlowTrades = new Queue<TimedFlowTrade>();
+
+        private sealed class TimedFlowTrade
+        {
+            public DateTime Time;
+            public double Price;
+            public long Volume;
+            public int Side;
+        }
+
         private NinjaTrader.Gui.NinjaScript.AtmStrategy.AtmStrategySelector atmStrategySelector;
         private System.Windows.Threading.DispatcherTimer atmDiagTimer;
         private NinjaTrader.NinjaScript.AtmStrategy lastAutoQtyAtm;
@@ -140,6 +156,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private Instrument currentInstrument;
         private MarketData marketData;
         private BarsRequest historicalProfileRequest;
+        private BarsRequest historicalFlowRequest;
         private DispatcherTimer depthRefreshTimer;
 
         // Fluxo negociado por preço. Não usa SuperDom.Rows nem MarketDepth.
@@ -271,6 +288,26 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private double ladderDisplayCenter = double.NaN;
         private const int AutoCenterEdgeRows = 5;
 
+        // V0.9.9.93 - integra "Janela Duplicar" ao menu nativo da barra de titulo.
+        private const int GuardianDuplicateWindowCommand = 0x1F10;
+        private HwndSource guardianHwndSource;
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetSystemMenu(IntPtr hWnd, bool bRevert);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern bool InsertMenu(IntPtr hMenu, uint uPosition, uint uFlags, UIntPtr uIDNewItem, string lpNewItem);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern bool AppendMenu(IntPtr hMenu, uint uFlags, UIntPtr uIDNewItem, string lpNewItem);
+
+        [DllImport("user32.dll")]
+        private static extern bool DrawMenuBar(IntPtr hWnd);
+
+        private const uint MF_BYPOSITION = 0x00000400;
+        private const uint MF_SEPARATOR = 0x00000800;
+        private const uint MF_STRING = 0x00000000;
+
         public GuardianDomWindow()
         {
             // Estrutura da janela baseada diretamente na GuardianWindow original.
@@ -294,6 +331,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // do LastUsedGroup do InstrumentSelector.
             Loaded += GuardianDomWindow_LoadedRestoreInstrument;
 
+
             depthRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
                 Interval = TimeSpan.FromMilliseconds(100)
@@ -302,6 +340,92 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             depthRefreshTimer.Start();
 
             Closed += GuardianDomWindow_Closed;
+        }
+
+        private void GuardianDomWindow_SourceInitialized(object sender, EventArgs e)
+        {
+            try
+            {
+                IntPtr hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd == IntPtr.Zero)
+                    return;
+
+                guardianHwndSource = HwndSource.FromHwnd(hwnd);
+                if (guardianHwndSource != null)
+                    guardianHwndSource.AddHook(GuardianDomWindow_WndProc);
+
+                IntPtr systemMenu = GetSystemMenu(hwnd, false);
+                if (systemMenu != IntPtr.Zero)
+                {
+                    // V0.9.9.93 - adiciona ao menu de sistema REAL da janela.
+                    // AppendMenu evita depender das posições internas que o NinjaTrader/WPF
+                    // pode reconstruir depois de SourceInitialized.
+                    AppendMenu(systemMenu, MF_SEPARATOR, UIntPtr.Zero, string.Empty);
+                    AppendMenu(systemMenu, MF_STRING,
+                        new UIntPtr((uint)GuardianDuplicateWindowCommand), "Janela Duplicar");
+                    DrawMenuBar(hwnd);
+                }
+            }
+            catch { }
+        }
+
+        private IntPtr GuardianDomWindow_WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            const int WM_SYSCOMMAND = 0x0112;
+            if (msg == WM_SYSCOMMAND)
+            {
+                int command = unchecked((int)(wParam.ToInt64() & 0xFFF0));
+                if (command == GuardianDuplicateWindowCommand)
+                {
+                    DuplicateGuardianDomWindow();
+                    handled = true;
+                }
+            }
+            return IntPtr.Zero;
+        }
+
+        private void DuplicateGuardianDomWindow()
+        {
+            string instrumentName = currentInstrument != null ? currentInstrument.FullName : ReadLastInstrumentName();
+            int periodMinutes = selectedPeriodMinutes;
+            int quantity = quantitySelector != null ? quantitySelector.Value : 1;
+
+            GuardianDomWindow duplicate = new GuardianDomWindow();
+            duplicate.Show();
+
+            duplicate.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                try
+                {
+                    duplicate.selectedPeriodMinutes = periodMinutes;
+                    if (duplicate.periodSelector != null)
+                    {
+                        string wanted = periodMinutes.ToString() + " min";
+                        for (int i = 0; i < duplicate.periodSelector.Items.Count; i++)
+                        {
+                            if (string.Equals(duplicate.periodSelector.Items[i].ToString(), wanted, StringComparison.OrdinalIgnoreCase))
+                            {
+                                duplicate.periodSelector.SelectedIndex = i;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (duplicate.quantitySelector != null)
+                        duplicate.quantitySelector.Value = quantity;
+
+                    if (!string.IsNullOrWhiteSpace(instrumentName))
+                    {
+                        Instrument instrument = Instrument.GetInstrument(instrumentName);
+                        if (instrument != null && duplicate.instrumentSelector != null)
+                        {
+                            duplicate.startupInstrumentName = instrument.FullName;
+                            duplicate.instrumentSelector.Instrument = instrument;
+                        }
+                    }
+                }
+                catch { }
+            }));
         }
 
         private UIElement BuildInterface()
@@ -347,6 +471,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             selectors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.0, GridUnitType.Star) });
             selectors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.6, GridUnitType.Star) });
             selectors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star) });
+            selectors.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.9, GridUnitType.Star) });
             selectors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             selectors.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -384,6 +509,49 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Grid.SetRow(quantityPanel, 0);
             selectors.Children.Add(quantityPanel);
 
+            // V0.9.9.89 - escolha do período diretamente no Guardian DOM.
+            StackPanel periodPanel = CreateSelectorPanel("PERÍODO");
+            periodSelector = new ComboBox
+            {
+                Margin = new Thickness(4, 4, 0, 0),
+                Height = 23,
+                ToolTip = "Janela usada em COMPRA / VENDA / DELTA"
+            };
+
+            int[] periodOptions = new int[] { 1, 3, 5, 15, 30, 60 };
+            for (int pi = 0; pi < periodOptions.Length; pi++)
+                periodSelector.Items.Add(periodOptions[pi] + " min");
+
+            selectedPeriodMinutes = ReadPeriodMinutes();
+            int periodIndex = Array.IndexOf(periodOptions, selectedPeriodMinutes);
+            if (periodIndex < 0)
+            {
+                selectedPeriodMinutes = 30;
+                periodIndex = Array.IndexOf(periodOptions, 30);
+            }
+
+            periodSelector.SelectedIndex = periodIndex;
+            periodSelector.SelectionChanged += (s, e) =>
+            {
+                if (periodSelector.SelectedItem == null)
+                    return;
+
+                string rawPeriod = periodSelector.SelectedItem.ToString().Replace(" min", "").Trim();
+                int minutes;
+                if (!int.TryParse(rawPeriod, out minutes) || minutes <= 0)
+                    return;
+
+                selectedPeriodMinutes = minutes;
+                SavePeriodMinutes();
+                LoadHistoricalFlowForPeriod();
+                UpdateDisplay();
+            };
+
+            periodPanel.Children.Add(periodSelector);
+            Grid.SetColumn(periodPanel, 3);
+            Grid.SetRow(periodPanel, 0);
+            selectors.Children.Add(periodPanel);
+
             StackPanel atmPanel = CreateSelectorPanel("ESTRATÉGIA ATM");
             atmStrategySelector = new NinjaTrader.Gui.NinjaScript.AtmStrategy.AtmStrategySelector
             {
@@ -404,7 +572,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             atmDiagTimer.Start();
             Grid.SetRow(atmPanel, 1);
             Grid.SetColumn(atmPanel, 0);
-            Grid.SetColumnSpan(atmPanel, 3);
+            Grid.SetColumnSpan(atmPanel, 4);
             selectors.Children.Add(atmPanel);
 
             Grid.SetRow(selectors, 1);
@@ -914,7 +1082,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.88 FILE LAST INSTRUMENT • ENVIO SOMENTE Sim101",
+                Text = "V0.9.9.93 JANELA DUPLICAR • ENVIO SOMENTE Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -1129,6 +1297,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // do GuardianDOM (cabeçalho, seletores, cotações, cabeçalho das colunas e status).
             ContextMenu customizationMenu = new ContextMenu();
 
+            // V0.9.9.93 - duplicação funcional da janela.
+            // O NTWindow customizado não expõe automaticamente o comando nativo de
+            // duplicação usado pelo Chart/SuperDOM, então disponibilizamos a mesma
+            // ação no menu de contexto do próprio Guardian DOM.
+            MenuItem duplicateWindowMenu = new MenuItem { Header = "Janela Duplicar" };
+            duplicateWindowMenu.Click += (s, e) => DuplicateGuardianDomWindow();
+            customizationMenu.Items.Add(duplicateWindowMenu);
+            customizationMenu.Items.Add(new Separator());
+
             MenuItem autoCenterMenu = new MenuItem { Header = "Centro automático", IsCheckable = true, IsChecked = !ladderManualNavigation };
             autoCenterMenu.Click += (s, e) =>
             {
@@ -1324,6 +1501,42 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             statusBorder.ContextMenu = customizationMenu;
 
             return root;
+        }
+
+        // V0.9.9.89 - persistência do período gráfico.
+        private string PeriodSettingsPath()
+        {
+            try { return Path.Combine(NinjaTrader.Core.Globals.UserDataDir, "GuardianDOM_PeriodMinutes.txt"); }
+            catch { return string.Empty; }
+        }
+
+        private int ReadPeriodMinutes()
+        {
+            try
+            {
+                string path = PeriodSettingsPath();
+                if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                    return 30;
+
+                int value;
+                if (int.TryParse(File.ReadAllText(path).Trim(), out value) &&
+                    (value == 1 || value == 3 || value == 5 || value == 15 || value == 30 || value == 60))
+                    return value;
+            }
+            catch { }
+
+            return 30;
+        }
+
+        private void SavePeriodMinutes()
+        {
+            try
+            {
+                string path = PeriodSettingsPath();
+                if (!string.IsNullOrEmpty(path))
+                    File.WriteAllText(path, selectedPeriodMinutes.ToString());
+            }
+            catch { }
         }
 
         // V0.9.9.79 - persistencia da ordem visual das colunas.
@@ -1625,7 +1838,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1636,7 +1849,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 atmStrategySelector == null ? null : atmStrategySelector.SelectedAtmStrategy;
             if (selectedAtm == null)
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • SELECIONE UMA ESTRATÉGIA ATM";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UMA ESTRATÉGIA ATM";
                 return;
             }
 
@@ -1685,14 +1898,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     orderStateStatus.Text = "ORDEM: " + (buy ? "COMPRA" : "VENDA") + " MERCADO • ENVIO SOLICITADO";
                     orderStateStatus.Foreground = Brushes.Gold;
                 }
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • " +
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • " +
                     (buy ? "COMPRA" : "VENDA") + " MERCADO " + quantity + " • ATM • Sim101";
             }
             catch (Exception ex)
             {
                 guardianSubmittedOrder = null;
                 guardianOrderStatus = "ERRO";
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • ERRO AO ENVIAR MERCADO: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • ERRO AO ENVIAR MERCADO: " + ex.Message;
             }
         }
 
@@ -1704,7 +1917,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
             if (currentInstrument == null)
@@ -1719,12 +1932,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     orderStateStatus.Text = "ORDEM: FECHAMENTO SOLICITADO";
                     orderStateStatus.Foreground = Brushes.Gold;
                 }
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • FECHAMENTO SOLICITADO • " +
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • FECHAMENTO SOLICITADO • " +
                     currentInstrument.FullName + " • Sim101";
             }
             catch (Exception ex)
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • ERRO NO FECHAMENTO: " + ex.Message;
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • ERRO NO FECHAMENTO: " + ex.Message;
             }
         }
 
@@ -1736,7 +1949,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1748,7 +1961,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (selectedAtm == null)
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • SELECIONE UMA ESTRATÉGIA ATM";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UMA ESTRATÉGIA ATM";
                 UpdateSendButtonState();
                 return;
             }
@@ -1845,7 +2058,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.85 LAST INSTRUMENT • ENVIO SOLICITADO: " + previewOrderSide +
+                    "V0.9.9.89 PERÍODO GRÁFICO • ENVIO SOLICITADO: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                     " • " + previewOrderType + " • SUBMIT DIAGNOSTIC • Sim101";
@@ -1864,7 +2077,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.85 LAST INSTRUMENT • ERRO AO ENVIAR: " + ex.Message;
+                    "V0.9.9.89 PERÍODO GRÁFICO • ERRO AO ENVIAR: " + ex.Message;
 
                 UpdateSendButtonState();
             }
@@ -1909,7 +2122,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • BLOQUEADO: SOMENTE Sim101";
                 return;
             }
 
@@ -1965,7 +2178,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         if (sendPreviewButton != null)
                             sendPreviewButton.IsEnabled = false;
                         connectionStatus.Text =
-                            "V0.9.9.85 LAST INSTRUMENT • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
+                            "V0.9.9.89 PERÍODO GRÁFICO • CANCELAMENTO PENDENTE • AGUARDANDO NINJATRADER";
                         return;
                     }
 
@@ -1994,7 +2207,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = false;
 
                 connectionStatus.Text =
-                    "V0.9.9.85 LAST INSTRUMENT • CANCELANDO " +
+                    "V0.9.9.89 PERÍODO GRÁFICO • CANCELANDO " +
                     toCancel.Count + " ORDEM(NS) GUARDIANDOM • Sim101";
             }
             catch (Exception ex)
@@ -2009,7 +2222,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     cancelOrderButton.IsEnabled = true;
 
                 connectionStatus.Text =
-                    "V0.9.9.85 LAST INSTRUMENT • ERRO AO CANCELAR: " + ex.Message;
+                    "V0.9.9.89 PERÍODO GRÁFICO • ERRO AO CANCELAR: " + ex.Message;
             }
         }
 
@@ -2095,7 +2308,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.85 LAST INSTRUMENT • STOP " +
+                "V0.9.9.89 PERÍODO GRÁFICO • STOP " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
@@ -2175,8 +2388,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         }
 
                         connectionStatus.Text = isStop
-                            ? "V0.9.9.85 LAST INSTRUMENT • POSIÇÃO ENCERRADA PELO STOP • OCO"
-                            : "V0.9.9.85 LAST INSTRUMENT • POSIÇÃO ENCERRADA PELO ALVO • OCO";
+                            ? "V0.9.9.89 PERÍODO GRÁFICO • POSIÇÃO ENCERRADA PELO STOP • OCO"
+                            : "V0.9.9.89 PERÍODO GRÁFICO • POSIÇÃO ENCERRADA PELO ALVO • OCO";
                     }
                     else if (state == OrderState.Rejected)
                     {
@@ -2185,7 +2398,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                             orderStateStatus.Text = isStop ? "STOP REJEITADO" : "ALVO REJEITADO";
                             orderStateStatus.Foreground = Brushes.OrangeRed;
                         }
-                        connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • ORDEM DE PROTEÇÃO REJEITADA";
+                        connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • ORDEM DE PROTEÇÃO REJEITADA";
                     }
 
                     // Cancelled no irmão OCO não deve sobrescrever a mensagem de saída executada.
@@ -2262,7 +2475,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
 
                 connectionStatus.Text =
-                    "V0.9.9.85 LAST INSTRUMENT • ORDEM: " + statePt +
+                    "V0.9.9.89 PERÍODO GRÁFICO • ORDEM: " + statePt +
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
@@ -2302,7 +2515,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             connectionStatus.Text =
-                "V0.9.9.85 LAST INSTRUMENT • " + previewOrderSide +
+                "V0.9.9.89 PERÍODO GRÁFICO • " + previewOrderSide +
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
@@ -2318,6 +2531,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // processamento de mercado continua acumulando todos os negócios,
             // mas perfil + interface são consolidados no timer (10 Hz).
             // Evita redesenhar toda a ladder a cada evento de market data.
+            TrimTimedFlowTrades();
             RefreshDailyProfile();
             RecalculateDailyProfile();
             UpdateDisplay();
@@ -2492,6 +2706,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             buyFlow.Clear();
             sellFlow.Clear();
+            timedFlowTrades.Clear();
             lastAggressorSide = 0;
             flowTrades = 0;
             dailyVolume.Clear();
@@ -2510,11 +2725,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
+            connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -2529,11 +2744,108 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 lastPrice = marketData.Last.Price;
 
             LoadHistoricalProfile();
+            LoadHistoricalFlowForPeriod();
             UpdateDisplay();
         }
 
         // V0.9.9.22: carrega o historico de negocios de 1 tick do dia.
         // Isso permite iniciar POC/VAH/VAL sem esperar a janela acumular do zero.
+        // V0.9.9.93 - pré-carrega o fluxo do período escolhido com ticks históricos.
+        // A classificação usa o movimento entre ticks (uptick/downtick) como aproximação
+        // histórica do agressor, pois o BarsRequest de 1 tick não traz o Bid/Ask histórico.
+        private void LoadHistoricalFlowForPeriod()
+        {
+            if (currentInstrument == null)
+                return;
+
+            if (historicalFlowRequest != null)
+            {
+                historicalFlowRequest.Dispose();
+                historicalFlowRequest = null;
+            }
+
+            DateTime now = DateTime.Now;
+            DateTime from = now.AddMinutes(-selectedPeriodMinutes);
+
+            historicalFlowRequest = new BarsRequest(currentInstrument, from, now);
+            historicalFlowRequest.BarsPeriod = new BarsPeriod
+            {
+                BarsPeriodType = BarsPeriodType.Tick,
+                Value = 1
+            };
+
+            BarsRequest request = historicalFlowRequest;
+            request.Request(new Action<BarsRequest, ErrorCode, string>(
+                (barsRequest, errorCode, errorMessage) =>
+                {
+                    if (errorCode != ErrorCode.NoError)
+                        return;
+
+                    List<TimedFlowTrade> historyTrades = new List<TimedFlowTrade>();
+                    double previousPrice = 0;
+                    int previousSide = 0;
+
+                    for (int i = 0; i < barsRequest.Bars.Count; i++)
+                    {
+                        DateTime t = barsRequest.Bars.GetTime(i);
+                        double p = currentInstrument.MasterInstrument.RoundToTickSize(
+                            barsRequest.Bars.GetClose(i));
+                        long v = barsRequest.Bars.GetVolume(i);
+
+                        if (p <= 0 || v <= 0)
+                            continue;
+
+                        int side;
+                        if (previousPrice <= 0)
+                            side = previousSide;
+                        else if (p > previousPrice)
+                            side = 1;
+                        else if (p < previousPrice)
+                            side = -1;
+                        else
+                            side = previousSide;
+
+                        if (side == 0)
+                            side = 1;
+
+                        historyTrades.Add(new TimedFlowTrade
+                        {
+                            Time = t,
+                            Price = p,
+                            Volume = v,
+                            Side = side
+                        });
+
+                        previousPrice = p;
+                        previousSide = side;
+                    }
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (historicalFlowRequest != request || currentInstrument == null)
+                            return;
+
+                        DateTime cutoff = DateTime.Now.AddMinutes(-selectedPeriodMinutes);
+
+                        // Mantém os negócios ao vivo que chegaram depois do fim do request.
+                        List<TimedFlowTrade> liveAfterRequest = new List<TimedFlowTrade>();
+                        foreach (TimedFlowTrade liveTrade in timedFlowTrades)
+                            if (liveTrade.Time > now)
+                                liveAfterRequest.Add(liveTrade);
+
+                        timedFlowTrades.Clear();
+                        foreach (TimedFlowTrade trade in historyTrades)
+                            if (trade.Time >= cutoff)
+                                timedFlowTrades.Enqueue(trade);
+                        foreach (TimedFlowTrade trade in liveAfterRequest)
+                            timedFlowTrades.Enqueue(trade);
+
+                        RebuildFlowFromTimedTrades();
+                        UpdateDisplay();
+                    }));
+                }));
+        }
+
         private void LoadHistoricalProfile()
         {
             if (currentInstrument == null)
@@ -2748,7 +3060,68 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // V0.9.9.40: não recalcular o perfil inteiro a cada negócio.
             // O timer de 100 ms faz o recálculo consolidado.
             lastAggressorSide = side;
-            flowTrades++;
+
+            timedFlowTrades.Enqueue(new TimedFlowTrade
+            {
+                Time = DateTime.Now,
+                Price = levelPrice,
+                Volume = volume,
+                Side = side
+            });
+
+            TrimTimedFlowTrades();
+            flowTrades = timedFlowTrades.Count;
+        }
+
+        private void TrimTimedFlowTrades()
+        {
+            DateTime cutoff = DateTime.Now.AddMinutes(-selectedPeriodMinutes);
+
+            while (timedFlowTrades.Count > 0 && timedFlowTrades.Peek().Time < cutoff)
+            {
+                TimedFlowTrade oldTrade = timedFlowTrades.Dequeue();
+                Dictionary<double, long> target = oldTrade.Side > 0 ? buyFlow : sellFlow;
+
+                long current;
+                if (target.TryGetValue(oldTrade.Price, out current))
+                {
+                    long remaining = current - oldTrade.Volume;
+                    if (remaining > 0)
+                        target[oldTrade.Price] = remaining;
+                    else
+                        target.Remove(oldTrade.Price);
+                }
+            }
+
+            flowTrades = timedFlowTrades.Count;
+        }
+
+        private void RebuildFlowFromTimedTrades()
+        {
+            buyFlow.Clear();
+            sellFlow.Clear();
+
+            DateTime cutoff = DateTime.Now.AddMinutes(-selectedPeriodMinutes);
+            Queue<TimedFlowTrade> kept = new Queue<TimedFlowTrade>();
+
+            while (timedFlowTrades.Count > 0)
+            {
+                TimedFlowTrade trade = timedFlowTrades.Dequeue();
+                if (trade.Time < cutoff)
+                    continue;
+
+                kept.Enqueue(trade);
+
+                Dictionary<double, long> target = trade.Side > 0 ? buyFlow : sellFlow;
+                long current;
+                target.TryGetValue(trade.Price, out current);
+                target[trade.Price] = current + trade.Volume;
+            }
+
+            while (kept.Count > 0)
+                timedFlowTrades.Enqueue(kept.Dequeue());
+
+            flowTrades = timedFlowTrades.Count;
         }
 
         private void RefreshDailyProfile()
@@ -2979,7 +3352,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                                     orderStateStatus.Text = "ERRO BE1 • STOP NÃO ALTERADO";
                                     orderStateStatus.Foreground = Brushes.OrangeRed;
                                 }
-                                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • ERRO BE1: " + ex.Message;
+                                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • ERRO BE1: " + ex.Message;
                             }
                         }
                         else
@@ -3100,11 +3473,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.85 LAST INSTRUMENT • NEGÓCIOS: " + flowTrades.ToString()
+            connectionStatus.Text = "V0.9.9.89 • PERÍODO: " + selectedPeriodMinutes.ToString() + "m • NEGÓCIOS: " + flowTrades.ToString()
                 + " • PERFIL: " + (dailyVolume.Count > 0
                     ? (lastVolumeBridgeVersion >= 0 ? "VOLUMEPRO OK"
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
@@ -3507,8 +3880,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 historicalProfileRequest = null;
             }
 
+            if (historicalFlowRequest != null)
+            {
+                historicalFlowRequest.Dispose();
+                historicalFlowRequest = null;
+            }
+
             buyFlow.Clear();
             sellFlow.Clear();
+            timedFlowTrades.Clear();
             lastAggressorSide = 0;
             flowTrades = 0;
             dailyVolume.Clear();
@@ -3522,6 +3902,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private void GuardianDomWindow_Closed(object sender, EventArgs e)
         {
             Closed -= GuardianDomWindow_Closed;
+
+            if (guardianHwndSource != null)
+            {
+                guardianHwndSource.RemoveHook(GuardianDomWindow_WndProc);
+                guardianHwndSource = null;
+            }
 
             if (depthRefreshTimer != null)
             {
