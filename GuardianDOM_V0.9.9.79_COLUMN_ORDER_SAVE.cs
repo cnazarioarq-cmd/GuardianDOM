@@ -422,11 +422,13 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             columnHeader.ColumnDefinitions.Add(headerVolumeCol);
             columnHeader.ColumnDefinitions.Add(headerDeltaCol);
 
-            AddHeaderCell(columnHeader, "COMPRA", 0);
-            AddHeaderCell(columnHeader, "PREÇO", 1);
-            AddHeaderCell(columnHeader, "VENDA", 2);
-            AddHeaderCell(columnHeader, "VOLUME", 3);
-            AddHeaderCell(columnHeader, "DELTA", 4);
+            // V0.9.9.78 - cabeçalhos arrastáveis para reordenar as colunas.
+            Border[] draggableHeaders = new Border[5];
+            draggableHeaders[0] = AddHeaderCell(columnHeader, "COMPRA", 0);
+            draggableHeaders[1] = AddHeaderCell(columnHeader, "PREÇO", 1);
+            draggableHeaders[2] = AddHeaderCell(columnHeader, "VENDA", 2);
+            draggableHeaders[3] = AddHeaderCell(columnHeader, "VOLUME", 3);
+            draggableHeaders[4] = AddHeaderCell(columnHeader, "DELTA", 4);
 
             // V0.9.9.38 - linha inferior contínua para destacar o cabeçalho da ladder.
             Border headerBottomSeparator = new Border
@@ -788,6 +790,72 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 deltaBorders[i].Child = deltaGrids[i];
             }
 
+            // V0.9.9.78 - DRAG COLUMN REORDER.
+            // Arraste qualquer cabeçalho sobre outro. A coluna inteira acompanha o título.
+            Border[][] logicalColumnBorders = new Border[][]
+            {
+                bidBorders, priceBorders, askBorders, volumeBorders, deltaBorders
+            };
+
+            // V0.9.9.79 - reaplica a ultima ordem escolhida ao abrir o GuardianDOM.
+            LoadColumnOrder(draggableHeaders, logicalColumnBorders);
+
+            int draggedLogicalColumn = -1;
+            for (int dc = 0; dc < draggableHeaders.Length; dc++)
+            {
+                int logicalIndex = dc;
+                Border hdr = draggableHeaders[dc];
+                hdr.Tag = logicalIndex;
+                hdr.Cursor = Cursors.Hand;
+                hdr.ToolTip = "Arraste para mudar a coluna de lugar";
+                hdr.AllowDrop = true;
+
+                hdr.MouseLeftButtonDown += (s, e) =>
+                {
+                    draggedLogicalColumn = logicalIndex;
+                    e.Handled = true;
+                };
+
+                hdr.MouseMove += (s, e) =>
+                {
+                    if (draggedLogicalColumn != logicalIndex || e.LeftButton != MouseButtonState.Pressed)
+                        return;
+                    DragDrop.DoDragDrop((DependencyObject)s, logicalIndex, DragDropEffects.Move);
+                    e.Handled = true;
+                };
+
+                hdr.Drop += (s, e) =>
+                {
+                    if (!e.Data.GetDataPresent(typeof(int))) return;
+                    int sourceLogical = (int)e.Data.GetData(typeof(int));
+                    int targetLogical = logicalIndex;
+                    if (sourceLogical == targetLogical) return;
+
+                    int sourceVisual = Grid.GetColumn(draggableHeaders[sourceLogical]);
+                    int targetVisual = Grid.GetColumn(draggableHeaders[targetLogical]);
+
+                    // Troca os cabeçalhos.
+                    Grid.SetColumn(draggableHeaders[sourceLogical], targetVisual);
+                    Grid.SetColumn(draggableHeaders[targetLogical], sourceVisual);
+
+                    // Troca todas as células das duas colunas, preservando conteúdo,
+                    // histogramas, cliques de preço e demais funções internas.
+                    for (int rr = 0; rr < LadderRows; rr++)
+                    {
+                        Grid.SetColumn(logicalColumnBorders[sourceLogical][rr], targetVisual);
+                        Grid.SetColumn(logicalColumnBorders[targetLogical][rr], sourceVisual);
+                    }
+
+                    // V0.9.9.79 - grava imediatamente a nova ordem.
+                    SaveColumnOrder(draggableHeaders);
+
+                    draggedLogicalColumn = -1;
+                    e.Handled = true;
+                };
+
+                hdr.MouseLeftButtonUp += (s, e) => draggedLogicalColumn = -1;
+            }
+
             Grid.SetRow(ladder, 4);
             root.Children.Add(ladder);
 
@@ -803,7 +871,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.77 RGB BORDER +/- • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101",
+                Text = "V0.9.9.79 COLUMN ORDER SAVE • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -1068,7 +1136,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     // padrao, ocupando automaticamente 100% da area disponivel.
                     if (!columnItem.IsChecked)
                     {
-                        double currentWidth = customizationHeaderCols[columnIndex].ActualWidth;
+                        int visualIndex = Grid.GetColumn(draggableHeaders[columnIndex]);
+                        double currentWidth = customizationHeaderCols[visualIndex].ActualWidth;
                         if (currentWidth > 1)
                             customizationSavedWidths[columnIndex] = currentWidth;
                     }
@@ -1078,26 +1147,21 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         MenuItem rcItem = columnsMenu.Items[rc] as MenuItem;
                         bool visible = rcItem != null && rcItem.IsChecked;
 
+                        int visualRc = Grid.GetColumn(draggableHeaders[rc]);
                         if (!visible)
                         {
-                            // V0.9.9.64 - FULL COLUMN VISIBILITY FIX:
-                            // a ladder possuia MinWidth nas colunas. Width=0 sozinho nao
-                            // conseguia colapsar a coluna e os dados continuavam visiveis.
-                            // Zera tambem MinWidth para a coluna realmente desaparecer.
-                            customizationHeaderCols[rc].MinWidth = 0;
-                            customizationLadderCols[rc].MinWidth = 0;
-                            customizationHeaderCols[rc].Width = new GridLength(0);
-                            customizationLadderCols[rc].Width = new GridLength(0);
+                            customizationHeaderCols[visualRc].MinWidth = 0;
+                            customizationLadderCols[visualRc].MinWidth = 0;
+                            customizationHeaderCols[visualRc].Width = new GridLength(0);
+                            customizationLadderCols[visualRc].Width = new GridLength(0);
                         }
                         else
                         {
-                            // Restaura o MinWidth e distribui todo o espaco entre
-                            // apenas as colunas que continuam visiveis.
-                            customizationHeaderCols[rc].MinWidth = 0;
-                            customizationLadderCols[rc].MinWidth = customizationMinWidths[rc];
+                            customizationHeaderCols[visualRc].MinWidth = 0;
+                            customizationLadderCols[visualRc].MinWidth = customizationMinWidths[rc];
                             double weight = customizationDefaultWidths[rc];
-                            customizationHeaderCols[rc].Width = new GridLength(weight, GridUnitType.Star);
-                            customizationLadderCols[rc].Width = new GridLength(weight, GridUnitType.Star);
+                            customizationHeaderCols[visualRc].Width = new GridLength(weight, GridUnitType.Star);
+                            customizationLadderCols[visualRc].Width = new GridLength(weight, GridUnitType.Star);
                         }
                     }
                 };
@@ -1152,6 +1216,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             MenuItem restoreMenu = new MenuItem { Header = "Restaurar visual padrão" };
             restoreMenu.Click += (s, e) =>
             {
+                // V0.9.9.78 - restaura também a ordem original das colunas.
+                for (int rc = 0; rc < draggableHeaders.Length; rc++)
+                {
+                    Grid.SetColumn(draggableHeaders[rc], rc);
+                    for (int rr = 0; rr < LadderRows; rr++)
+                        Grid.SetColumn(logicalColumnBorders[rc][rr], rc);
+                }
+                SaveColumnOrder(draggableHeaders);
+
                 for (int c = 0; c < customizationHeaderCols.Length; c++)
                 {
                     customizationSavedWidths[c] = customizationDefaultWidths[c];
@@ -1198,6 +1271,52 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             statusBorder.ContextMenu = customizationMenu;
 
             return root;
+        }
+
+        // V0.9.9.79 - persistencia da ordem visual das colunas.
+        private string ColumnOrderSettingsPath()
+        {
+            try { return Path.Combine(NinjaTrader.Core.Globals.UserDataDir, "GuardianDOM_ColumnOrder.txt"); }
+            catch { return string.Empty; }
+        }
+
+        private void SaveColumnOrder(Border[] headers)
+        {
+            try
+            {
+                string path = ColumnOrderSettingsPath();
+                if (string.IsNullOrEmpty(path) || headers == null || headers.Length != 5) return;
+                int[] visualToLogical = new int[5];
+                for (int logical = 0; logical < headers.Length; logical++)
+                {
+                    int visual = Grid.GetColumn(headers[logical]);
+                    if (visual >= 0 && visual < visualToLogical.Length) visualToLogical[visual] = logical;
+                }
+                File.WriteAllText(path, string.Join(",", visualToLogical));
+            }
+            catch { }
+        }
+
+        private void LoadColumnOrder(Border[] headers, Border[][] logicalBorders)
+        {
+            try
+            {
+                string path = ColumnOrderSettingsPath();
+                if (string.IsNullOrEmpty(path) || !File.Exists(path) || headers == null || logicalBorders == null) return;
+                string[] parts = File.ReadAllText(path).Trim().Split(',');
+                if (parts.Length != 5) return;
+                bool[] used = new bool[5];
+                for (int visual = 0; visual < 5; visual++)
+                {
+                    int logical;
+                    if (!int.TryParse(parts[visual], out logical) || logical < 0 || logical >= 5 || used[logical]) return;
+                    used[logical] = true;
+                    Grid.SetColumn(headers[logical], visual);
+                    for (int rr = 0; rr < LadderRows; rr++)
+                        Grid.SetColumn(logicalBorders[logical][rr], visual);
+                }
+            }
+            catch { }
         }
 
         // V0.9.9.74 - aplica a mesma cor-base a todas as colunas sem remover divisórias,
@@ -3274,7 +3393,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             return valueBlock;
         }
 
-        private void AddHeaderCell(Grid grid, string text, int column)
+        private Border AddHeaderCell(Grid grid, string text, int column)
         {
             Border border = new Border
             {
@@ -3295,6 +3414,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             Grid.SetColumn(border, column);
             grid.Children.Add(border);
+            return border;
         }
 
         private TextBlock AddLadderCell(Grid grid, string text, int row, int column, Brush background, out Border border)
