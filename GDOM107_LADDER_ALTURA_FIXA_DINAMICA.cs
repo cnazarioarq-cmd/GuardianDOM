@@ -283,8 +283,10 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private double bidPrice;
         private double askPrice;
 
-        private const int LadderRows = 21;
-        private const int CenterRow = 10;
+        private const int LadderRows = 41;
+        private const int CenterRow = 20;
+        private const double LadderRowHeight = 17.0;
+        private const int PanelHiddenOuterRows = 3;
 
         // Navegação manual da ladder. Zero = acompanha o mercado.
         private int ladderOffsetTicks = 0;
@@ -606,7 +608,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Grid quotePanel = new Grid
             {
                 Margin = new Thickness(8, 0, 8, 6),
-                Height = 44,
+                Height = 32,
                 Background = new SolidColorBrush(Color.FromRgb(32, 32, 34))
             };
 
@@ -867,7 +869,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             for (int i = 0; i < LadderRows; i++)
             {
-                ladder.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                ladder.RowDefinitions.Add(new RowDefinition { Height = new GridLength(LadderRowHeight) });
 
                 bidCells[i] = AddLadderCell(ladder, "", i, 0,
                     LadderBaseBrush, out bidBorders[i]);
@@ -1024,6 +1026,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 deltaGrids[i].Children.Add(deltaNegativeCells[i]);
                 deltaGrids[i].Children.Add(deltaPositiveCells[i]);
                 deltaBorders[i].Child = deltaGrids[i];
+            }
+
+            // GDOM107 - altura fixa e compacta. A ladder possui 41 níveis reais.
+            // Com o painel operacional ativo, ocultamos somente as linhas externas que
+            // não cabem na área disponível; sem o painel, as 41 linhas ficam visíveis.
+            // Assim a altura de cada tick nunca é esticada pelo Grid.
+            for (int rr = 0; rr < PanelHiddenOuterRows; rr++)
+            {
+                ladder.RowDefinitions[rr].Height = new GridLength(0);
+                ladder.RowDefinitions[LadderRows - 1 - rr].Height = new GridLength(0);
             }
 
             // V0.9.9.78 - DRAG COLUMN REORDER.
@@ -1222,7 +1234,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 Content = "COMPRA MERC.",
                 Height = 30,
-                FontSize = 14,
+                FontSize = 12,
                 FontWeight = FontWeights.Bold,
                 Margin = new Thickness(0, 0, 2, 0),
                 Background = Brushes.Green,
@@ -1449,17 +1461,40 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             navigationMenu.Click += (s, e) => navigationPanel.Visibility = navigationMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
             indicatorsMenu.Items.Add(navigationMenu);
 
-            MenuItem orderButtonsMenu = new MenuItem { Header = "Botões de ordem", IsCheckable = true, IsChecked = true };
+            // GDOM105 - modo de acompanhamento por janela.
+            // Desmarcar recolhe COMPRA / PnL / VENDA e FECHAMENTO, liberando o espaço
+            // vertical para a ladder. POC / VAH / VAL permanece visível e o estado
+            // não é compartilhado entre GuardianDOMs vinculados.
+            MenuItem orderButtonsMenu = new MenuItem { Header = "Painel de operações", IsCheckable = true, IsChecked = true };
             orderButtonsMenu.Click += (s, e) =>
             {
-                Visibility v = orderButtonsMenu.IsChecked ? Visibility.Visible : Visibility.Collapsed;
-                if (marketBuyButton != null) marketBuyButton.Visibility = v;
-                if (marketSellButton != null) marketSellButton.Visibility = v;
+                bool panelAtivo = orderButtonsMenu.IsChecked;
+                Visibility v = panelAtivo ? Visibility.Visible : Visibility.Collapsed;
+                quickTradePanel.Visibility = v;
                 if (flattenButton != null) flattenButton.Visibility = v;
-                sendPreviewButton.Visibility = v;
-                cancelOrderButton.Visibility = v;
+
+                // GDOM105 - no modo de acompanhamento, os controles manuais de navegação
+                // também são recolhidos para aproximar o layout do SuperDOM antigo e
+                // entregar mais altura útil à ladder. A roda do mouse e o auto-centro
+                // continuam disponíveis.
+                navigationPanel.Visibility = v;
+                navigationMenu.IsChecked = panelAtivo;
+
+                // GDOM107 - altura fixa: com painel mostramos 35 níveis; sem painel, 41.
+                // Nenhuma linha é engrossada para preencher o espaço restante.
+                if (ladder != null && ladder.RowDefinitions.Count == LadderRows)
+                {
+                    for (int rr = 0; rr < LadderRows; rr++)
+                    {
+                        bool outer = rr < PanelHiddenOuterRows || rr >= LadderRows - PanelHiddenOuterRows;
+                        ladder.RowDefinitions[rr].Height = (panelAtivo && outer)
+                            ? new GridLength(0)
+                            : new GridLength(LadderRowHeight);
+                    }
+                }
+                UpdateDisplay();
             };
-            indicatorsMenu.Items.Add(orderButtonsMenu);
+            customizationMenu.Items.Add(orderButtonsMenu);
 
             MenuItem ladderColorMenu = new MenuItem { Header = "Cor de fundo da ladder..." };
             ladderColorMenu.Click += (s, e) => ShowLadderBackgroundColorDialog();
@@ -1499,17 +1534,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 orderStateStatus.Visibility = Visibility.Visible;
                 profileStatus.Visibility = Visibility.Visible;
                 navigationPanel.Visibility = Visibility.Visible;
-                if (marketBuyButton != null) marketBuyButton.Visibility = Visibility.Visible;
-                if (marketSellButton != null) marketSellButton.Visibility = Visibility.Visible;
+                quickTradePanel.Visibility = Visibility.Visible;
                 if (flattenButton != null) flattenButton.Visibility = Visibility.Visible;
-                sendPreviewButton.Visibility = Visibility.Visible;
-                cancelOrderButton.Visibility = Visibility.Visible;
+                orderButtonsMenu.IsChecked = true;
                 quotesMenu.IsChecked = true;
                 aggressionMenu.IsChecked = true;
                 orderStateMenu.IsChecked = true;
                 profileMenu.IsChecked = true;
                 navigationMenu.IsChecked = true;
-                orderButtonsMenu.IsChecked = true;
                 Topmost = false;
                 alwaysOnTopMenu.IsChecked = false;
                 SetLadderBackgroundColor(Color.FromRgb(55, 55, 58), true);
@@ -3875,7 +3907,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 else
                 {
                     double distanceTicks = Math.Abs((marketCenter - ladderDisplayCenter) / tickSize);
-                    int triggerTicks = CenterRow - AutoCenterEdgeRows; // 21 linhas: dispara a 5 ticks do centro
+                    int triggerTicks = CenterRow - AutoCenterEdgeRows; // GDOM107: centro acompanha a ladder compacta
                     if (distanceTicks >= triggerTicks)
                         ladderDisplayCenter = marketCenter;
                 }
@@ -4370,16 +4402,19 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 Background = background,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(70, 70, 74)),
                 BorderThickness = new Thickness(0.5),
-                Padding = new Thickness(4)
+                Padding = new Thickness(2, 1, 2, 1)
             };
 
-            StackPanel panel = new StackPanel();
+            StackPanel panel = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center
+            };
 
             panel.Children.Add(new TextBlock
             {
                 Text = label,
                 Foreground = Brushes.LightGray,
-                FontSize = 9,
+                FontSize = 8,
                 FontWeight = FontWeights.Bold,
                 HorizontalAlignment = HorizontalAlignment.Center
             });
