@@ -1,4 +1,4 @@
-#region Using declarations
+﻿#region Using declarations
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -347,7 +347,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             Caption = "Guardian DOM";
             Width = 555;
             Height = 760;
-            MinWidth = 480;
+            // GDOM119 - redimensionamento horizontal livre pelo usuario.
+            // Sem largura minima fixa do GuardianDOM: a borda da janela pode ser arrastada
+            // para a largura desejada, e as colunas visiveis continuam se adaptando.
+            MinWidth = 0;
+            ResizeMode = ResizeMode.CanResize;
             MinHeight = 560;
 
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -364,6 +368,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             Content = BuildInterface();
+
+            // GDOM121B - responsividade conservadora.
+            // IMPORTANTE: nao altera ColumnDefinitions da ladder. Assim, colunas
+            // ocultas (COMPRA/VENDA) continuam em largura zero como na GDOM120.
+            SizeChanged += (s, e) => ApplyCompactOuterLayout();
+            Loaded += (s, e) => ApplyCompactOuterLayout();
 
             // V0.9.9.88 - persistencia explicita do ultimo ativo.
             // O nome e salvo em GuardianDOM_LastInstrument.txt e a restauracao manual
@@ -737,7 +747,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 ladderBuyCol, ladderPriceCol, ladderSellCol, ladderVolumeCol, ladderDeltaCol
             };
-            double[] minWidths = new double[] { 45, 60, 45, 50, 60 };
+            double[] minWidths = new double[] { 20, 20, 20, 30, 30 };
 
             for (int h = 0; h < 4; h++)
             {
@@ -755,13 +765,32 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 double startX = 0;
                 double leftStart = 0;
                 double rightStart = 0;
+                int dragLeftIndex = -1;
+                int dragRightIndex = -1;
 
                 handle.MouseLeftButtonDown += (s, e) =>
                 {
+                    // GDOM120 - nunca redimensiona/reabre coluna oculta.
+                    // O divisor usa a coluna visível à esquerda e procura a próxima
+                    // coluna visível à direita, pulando COMPRA/VENDA quando ocultas.
+                    dragLeftIndex = handleIndex;
+                    while (dragLeftIndex >= 0 && headerCols[dragLeftIndex].ActualWidth <= 1)
+                        dragLeftIndex--;
+
+                    dragRightIndex = handleIndex + 1;
+                    while (dragRightIndex < headerCols.Length && headerCols[dragRightIndex].ActualWidth <= 1)
+                        dragRightIndex++;
+
+                    if (dragLeftIndex < 0 || dragRightIndex >= headerCols.Length)
+                    {
+                        e.Handled = true;
+                        return;
+                    }
+
                     dragging = true;
                     startX = e.GetPosition(columnHeader).X;
-                    leftStart = headerCols[handleIndex].ActualWidth;
-                    rightStart = headerCols[handleIndex + 1].ActualWidth;
+                    leftStart = headerCols[dragLeftIndex].ActualWidth;
+                    rightStart = headerCols[dragRightIndex].ActualWidth;
                     ((Border)s).CaptureMouse();
                     e.Handled = true;
                 };
@@ -775,21 +804,24 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     double newLeft = leftStart + dx;
                     double newRight = rightStart - dx;
 
-                    if (newLeft < minWidths[handleIndex])
+                    if (dragLeftIndex < 0 || dragRightIndex < 0)
+                        return;
+
+                    if (newLeft < minWidths[dragLeftIndex])
                     {
-                        newLeft = minWidths[handleIndex];
+                        newLeft = minWidths[dragLeftIndex];
                         newRight = leftStart + rightStart - newLeft;
                     }
-                    if (newRight < minWidths[handleIndex + 1])
+                    if (newRight < minWidths[dragRightIndex])
                     {
-                        newRight = minWidths[handleIndex + 1];
+                        newRight = minWidths[dragRightIndex];
                         newLeft = leftStart + rightStart - newRight;
                     }
 
-                    headerCols[handleIndex].Width = new GridLength(newLeft);
-                    headerCols[handleIndex + 1].Width = new GridLength(newRight);
-                    ladderCols[handleIndex].Width = new GridLength(newLeft);
-                    ladderCols[handleIndex + 1].Width = new GridLength(newRight);
+                    headerCols[dragLeftIndex].Width = new GridLength(newLeft);
+                    headerCols[dragRightIndex].Width = new GridLength(newRight);
+                    ladderCols[dragLeftIndex].Width = new GridLength(newLeft);
+                    ladderCols[dragRightIndex].Width = new GridLength(newRight);
                     e.Handled = true;
                 };
 
@@ -1409,7 +1441,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             };
             string[] customizationColumnNames = new string[] { "COMPRA", "PREÇO", "VENDA", "VOLUME", "DELTA" };
             double[] customizationDefaultWidths = new double[] { 90, 100, 90, 75, 115 };
-            double[] customizationMinWidths = new double[] { 45, 60, 45, 50, 60 };
+            double[] customizationMinWidths = new double[] { 20, 20, 20, 30, 30 };
             double[] customizationSavedWidths = new double[] { 90, 100, 90, 75, 115 };
 
             for (int c = 0; c < customizationColumnNames.Length; c++)
@@ -4454,6 +4486,37 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (accountSelector != null)
                 accountSelector.Cleanup();
+        }
+
+        // GDOM121B - compacta somente controles EXTERNOS a ladder.
+        // Nao toca em header/ladder ColumnDefinitions, ordem, visibilidade ou cores.
+        private void ApplyCompactOuterLayout()
+        {
+            double w = ActualWidth > 0 ? ActualWidth : Width;
+            bool compact = w < 430;
+            bool veryCompact = w < 330;
+
+            double selectorFont = veryCompact ? 9.0 : (compact ? 10.0 : 12.0);
+            double buttonFont = veryCompact ? 10.0 : (compact ? 11.0 : 12.0);
+            double statusFont = veryCompact ? 9.0 : (compact ? 10.0 : 11.0);
+
+            if (instrumentSelector != null) instrumentSelector.FontSize = selectorFont;
+            if (accountSelector != null) accountSelector.FontSize = selectorFont;
+            if (quantitySelector != null) quantitySelector.FontSize = selectorFont;
+            if (periodSelector != null) periodSelector.FontSize = selectorFont;
+            if (atmStrategySelector != null) atmStrategySelector.FontSize = selectorFont;
+
+            if (marketBuyButton != null) marketBuyButton.FontSize = buttonFont;
+            if (marketSellButton != null) marketSellButton.FontSize = buttonFont;
+            if (flattenButton != null) flattenButton.FontSize = buttonFont;
+            if (sendPreviewButton != null) sendPreviewButton.FontSize = buttonFont;
+            if (cancelOrderButton != null) cancelOrderButton.FontSize = buttonFont;
+            if (marketPnlValue != null) marketPnlValue.FontSize = buttonFont;
+
+            if (connectionStatus != null) connectionStatus.FontSize = statusFont;
+            if (profileStatus != null) profileStatus.FontSize = statusFont;
+            if (aggressionBalanceStatus != null) aggressionBalanceStatus.FontSize = statusFont;
+            if (orderStateStatus != null) orderStateStatus.FontSize = statusFont;
         }
 
         private StackPanel CreateSelectorPanel(string label)
