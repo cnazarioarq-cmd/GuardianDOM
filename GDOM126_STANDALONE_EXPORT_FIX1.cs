@@ -199,9 +199,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private int lastAggressorSide; // +1 compra, -1 venda, 0 desconhecido
         private long flowTrades;
 
-        // Perfil diário lido do GuardianVolumeBridge já alimentado pelo
-        // Guardian VolumePro V0.10.3. O GuardianDOM NÃO cria outro BarsRequest.
+        // Perfil diário independente mantido pelo próprio GuardianDOM.
         private readonly Dictionary<double, long> dailyVolume = new Dictionary<double, long>();
+        // Standalone: estado interno do perfil (sem dependencia externa).
         private long lastVolumeBridgeVersion = -1;
         private long maxDailyVolume;
         private double profilePoc = double.NaN;
@@ -3704,33 +3704,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             if (currentInstrument == null)
                 return;
 
-            long version = GuardianVolumeBridge.Versao;
-            if (version == lastVolumeBridgeVersion)
-                return;
-
-            Dictionary<double, long> snapshot =
-                GuardianVolumeBridge.Snapshot(currentInstrument.FullName);
-
-            // Bridge externo continua tendo prioridade. Sem ele, mantém o
-            // perfil local acumulado pelos negócios recebidos nesta janela.
-            if (snapshot.Count == 0)
-            {
-                if (dailyVolume.Count > 0)
-                    RecalculateDailyProfile();
-                return;
-            }
-
-            dailyVolume.Clear();
-            foreach (KeyValuePair<double, long> kv in snapshot)
-            {
-                double price = currentInstrument.MasterInstrument.RoundToTickSize(kv.Key);
-                long current;
-                dailyVolume.TryGetValue(price, out current);
-                dailyVolume[price] = current + kv.Value;
-            }
-
-            lastVolumeBridgeVersion = version;
-            RecalculateDailyProfile();
+            // GDOM126 STANDALONE:
+            // O perfil diario e mantido pelo proprio GuardianDOM (historico + negocios ao vivo).
+            // Nao depende do GuardianVolumeBridge/Guardian VolumePro, permitindo exportar
+            // o GuardianDOM como pacote NinjaScript independente.
+            if (dailyVolume.Count > 0)
+                RecalculateDailyProfile();
         }
 
         private void RecalculateDailyProfile()
