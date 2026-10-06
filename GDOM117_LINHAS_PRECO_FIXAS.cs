@@ -1,4 +1,4 @@
-﻿#region Using declarations
+#region Using declarations
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -22,6 +22,7 @@ using NinjaTrader.NinjaScript.SuperDomColumns;
 
 namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 {
+    // GDOM112 - paleta mais fechada estilo DOM antigo + divisórias horizontais fixas.
 
     public static class GuardianDepthBridge
     {
@@ -172,6 +173,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private BarsRequest historicalProfileRequest;
         private BarsRequest historicalFlowRequest;
         private DispatcherTimer depthRefreshTimer;
+        // GDOM109: atualização prioritária de BID / ASK / LAST sem redesenhar a ladder inteira.
+        private DispatcherTimer fastPriceRefreshTimer;
 
         // GDOM108 PERFORMANCE - market data is buffered off the UI thread and
         // consolidated by the existing refresh timer. This avoids one Dispatcher
@@ -376,6 +379,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             };
             depthRefreshTimer.Tick += OnDepthRefreshTimerTick;
             depthRefreshTimer.Start();
+
+            // GDOM109 PREÇO EM TEMPO REAL:
+            // drena os eventos de mercado em alta frequência e atualiza apenas
+            // BID / LAST / ASK. A ladder pesada continua consolidada a 10 Hz.
+            fastPriceRefreshTimer = new DispatcherTimer(DispatcherPriority.Render)
+            {
+                Interval = TimeSpan.FromMilliseconds(25)
+            };
+            fastPriceRefreshTimer.Tick += OnFastPriceRefreshTimerTick;
+            fastPriceRefreshTimer.Start();
 
             Closed += GuardianDomWindow_Closed;
         }
@@ -630,9 +643,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             quotePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             quotePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            bidValue = AddQuoteBox(quotePanel, "BID", "--", 0, new SolidColorBrush(Color.FromRgb(31, 55, 82)));
+            bidValue = AddQuoteBox(quotePanel, "BID", "--", 0, Brushes.Green);
             lastValue = AddQuoteBox(quotePanel, "LAST", "--", 1, new SolidColorBrush(Color.FromRgb(62, 62, 65)));
-            askValue = AddQuoteBox(quotePanel, "ASK", "--", 2, new SolidColorBrush(Color.FromRgb(83, 40, 40)));
+            askValue = AddQuoteBox(quotePanel, "ASK", "--", 2, Brushes.DarkRed);
 
             Grid.SetRow(quotePanel, 2);
             root.Children.Add(quotePanel);
@@ -891,6 +904,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 priceCells[i] = AddLadderCell(ladder, "--", i, 1,
                     LadderBaseBrush, out priceBorders[i]);
 
+                // GDOM113 - cada nível de PREÇO permanece uma célula visual independente.
+                // A tendência colore o fundo, mas esta borda escura fixa preserva
+                // a separação horizontal como no SuperDOM antigo.
+                priceBorders[i].BorderBrush = new SolidColorBrush(Color.FromRgb(45, 45, 48));
+                priceBorders[i].BorderThickness = new Thickness(0, 0, 1, 1);
+
                 int previewRow = i;
                 priceCells[i].Cursor = Cursors.Hand;
                 priceCells[i].MouseLeftButtonDown +=
@@ -918,7 +937,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 bidBorders[i].Child = null;
                 buyFlowBars[i] = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(25, 112, 55)),
+                    Background = new SolidColorBrush(Color.FromRgb(0, 128, 0)),
                     HorizontalAlignment = HorizontalAlignment.Right,
                     Width = 0
                 };
@@ -940,7 +959,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 askBorders[i].Child = null;
                 sellFlowBars[i] = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(145, 45, 45)),
+                    Background = new SolidColorBrush(Color.FromRgb(139, 0, 0)),
                     HorizontalAlignment = HorizontalAlignment.Left,
                     Width = 0
                 };
@@ -976,7 +995,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 {
                     // V0.9.9.49 - mesmo fundo-base das colunas VENDA/COMPRA.
                     Background = LadderBaseBrush,
-                    BorderBrush = new SolidColorBrush(Color.FromRgb(52, 52, 55)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(72, 72, 75)),
                     BorderThickness = new Thickness(0, 0, 1, 1)
                 };
                 Grid.SetRow(deltaBorders[i], i);
@@ -989,7 +1008,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 deltaNegativeBars[i] = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(125, 22, 25)),
+                    Background = new SolidColorBrush(Color.FromRgb(139, 0, 0)),
                     HorizontalAlignment = HorizontalAlignment.Left,
                     VerticalAlignment = VerticalAlignment.Stretch,
                     Width = 0
@@ -998,7 +1017,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 deltaPositiveBars[i] = new Border
                 {
-                    Background = new SolidColorBrush(Color.FromRgb(20, 105, 35)),
+                    Background = new SolidColorBrush(Color.FromRgb(0, 128, 0)),
                     HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Stretch,
                     Width = 0
@@ -2563,7 +2582,10 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 priceBorders[i].BorderBrush =
                     new SolidColorBrush(Color.FromRgb(58, 58, 61));
-                priceBorders[i].BorderThickness = new Thickness(0.5);
+                // GDOM117 - mantém a divisória horizontal de 1 px em TODOS os níveis de preço.
+                // Antes, a atualização da prévia sobrescrevia a borda fixa com 0,5 px,
+                // fazendo algumas linhas desaparecerem visualmente. Cores preservadas da GDOM116.
+                priceBorders[i].BorderThickness = new Thickness(0, 0, 1, 1);
             }
 
             if (double.IsNaN(previewOrderPrice) || currentInstrument == null)
@@ -2594,6 +2616,25 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
                 " • PRÉVIA PRONTA • ENVIO SOMENTE Sim101";
+        }
+
+        private void OnFastPriceRefreshTimerTick(object sender, EventArgs e)
+        {
+            if (currentInstrument == null)
+                return;
+
+            // Processa imediatamente os eventos pendentes para que os preços
+            // não esperem o ciclo pesado de 100 ms.
+            DrainPendingMarketEvents();
+
+            // Atualização propositalmente leve: não recalcula perfil, barras,
+            // volume nem reconstrói a ladder.
+            if (bidValue != null)
+                bidValue.Text = FormatPrice(bidPrice);
+            if (askValue != null)
+                askValue.Text = FormatPrice(askPrice);
+            if (lastValue != null)
+                lastValue.Text = FormatPrice(lastPrice);
         }
 
         private void OnDepthRefreshTimerTick(object sender, EventArgs e)
@@ -4066,8 +4107,8 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     deltaPositiveBars[row].Width = delta > 0 ? deltaBarWidth : 0;
 
                     double deltaHeat = Math.Sqrt(deltaRatio);
-                    deltaNegativeBars[row].Opacity = delta < 0 ? 0.16 + (0.84 * deltaHeat) : 0.0;
-                    deltaPositiveBars[row].Opacity = delta > 0 ? 0.16 + (0.84 * deltaHeat) : 0.0;
+                    deltaNegativeBars[row].Opacity = delta < 0 ? 0.30 + (0.70 * deltaHeat) : 0.0;
+                    deltaPositiveBars[row].Opacity = delta > 0 ? 0.30 + (0.70 * deltaHeat) : 0.0;
 
                     deltaNegativeCells[row].Text = delta < 0 ? delta.ToString() : "";
                     deltaPositiveCells[row].Text = delta > 0 ? delta.ToString() : "";
@@ -4110,12 +4151,20 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 // os maiores ficam fortes, como no DOM antigo.
                 double buyHeat = Math.Sqrt(buyRatio);
                 double sellHeat = Math.Sqrt(sellRatio);
-                buyFlowBars[row].Opacity = buyVolume > 0 ? 0.16 + (0.84 * buyHeat) : 0.0;
-                sellFlowBars[row].Opacity = sellVolume > 0 ? 0.16 + (0.84 * sellHeat) : 0.0;
+                buyFlowBars[row].Opacity = buyVolume > 0 ? 0.30 + (0.70 * buyHeat) : 0.0;
+                sellFlowBars[row].Opacity = sellVolume > 0 ? 0.30 + (0.70 * sellHeat) : 0.0;
 
-                // V0.9.9.3 ATM: o preço não depende de MarketDepth.
-                // A leitura visual do fluxo fica nas colunas COMPRA/VENDA.
-                Brush priceBackground = LadderBaseBrush;
+                // GDOM110 - TENDÊNCIA NA COLUNA PREÇO.
+                // Usa o saldo de agressão do período atual já calculado pelo GuardianDOM:
+                // compradores dominando = coluna PREÇO verde;
+                // vendedores dominando = coluna PREÇO vermelha;
+                // empate/sem fluxo = fundo neutro.
+                // A linha LAST continua amarela e tem prioridade visual abaixo.
+                Brush priceBackground = aggressionBalance > 0
+                    ? new SolidColorBrush(Color.FromRgb(0, 128, 0))
+                    : (aggressionBalance < 0
+                        ? new SolidColorBrush(Color.FromRgb(139, 0, 0))
+                        : LadderBaseBrush);
 
                 long daily = 0;
                 dailyVolume.TryGetValue(levelPrice, out daily);
@@ -4350,6 +4399,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 depthRefreshTimer.Stop();
                 depthRefreshTimer.Tick -= OnDepthRefreshTimerTick;
+
+            if (fastPriceRefreshTimer != null)
+            {
+                fastPriceRefreshTimer.Stop();
+                fastPriceRefreshTimer.Tick -= OnFastPriceRefreshTimerTick;
+            }
                 depthRefreshTimer = null;
             }
 
@@ -4489,7 +4544,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             {
                 Background = background,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(58, 58, 61)),
-                BorderThickness = new Thickness(0.5)
+                // GDOM113 - separação horizontal fixa e mais contrastante.
+                // Evita o efeito de linhas "sumindo" causado pela borda de 0,5 px.
+                BorderThickness = new Thickness(0, 0, 1, 1)
             };
 
             TextBlock block = new TextBlock
