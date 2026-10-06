@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Interop;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
+using System.Xml.Linq;
 
 using NinjaTrader.Cbi;
 using NinjaTrader.Data;
@@ -124,7 +125,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         }
     }
 
-    public class GuardianDomWindow : NTWindow
+    public class GuardianDomWindow : NTWindow, IWorkspacePersistence
     {
         private InstrumentSelector instrumentSelector;
         private AccountSelector accountSelector;
@@ -341,8 +342,32 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private const uint MF_SEPARATOR = 0x00000800;
         private const uint MF_STRING = 0x00000000;
 
+        public WorkspaceOptions WorkspaceOptions { get; set; }
+
+        // GDOM126 - integra a janela ao sistema nativo de Workspaces do NinjaTrader.
+        // Cada Guardian DOM aberto e salvo no Workspace recebe uma identidade própria;
+        // assim, ao reabrir o Workspace, o NinjaTrader recria somente as instâncias
+        // que estavam salvas nele (inclusive múltiplas janelas), sem autoabrir GDOMs extras.
+        public void Save(XDocument document, XElement element)
+        {
+            // A posição, tamanho e estado básico da NTWindow são tratados pelo WorkspaceOptions.
+            // Mantemos este método propositalmente leve para não alterar a lógica estável da GDOM125.
+        }
+
+        public void Restore(XDocument document, XElement element)
+        {
+            // A própria restauração do Workspace instancia esta janela pelo construtor padrão.
+            // Não criamos janelas manualmente aqui para evitar duplicação na inicialização.
+        }
+
         public GuardianDomWindow()
         {
+            Loaded += (o, e) =>
+            {
+                if (WorkspaceOptions == null)
+                    WorkspaceOptions = new WorkspaceOptions(
+                        "GuardianDOM-" + Guid.NewGuid().ToString("N"), this);
+            };
             // Estrutura da janela baseada diretamente na GuardianWindow original.
             Caption = "Guardian DOM";
             Width = 555;
