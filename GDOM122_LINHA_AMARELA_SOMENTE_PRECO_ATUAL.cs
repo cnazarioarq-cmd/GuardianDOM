@@ -4254,9 +4254,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 {
                     Brush activeRow = new SolidColorBrush(Color.FromRgb(245, 205, 45));
 
+                    // GDOM122 - destaque do LAST atravessa SOMENTE a linha do preço atual.
+                    // Todas as colunas lógicas recebem o mesmo fundo; nas linhas seguintes
+                    // os fundos de VOLUME/DELTA são explicitamente restaurados.
                     bidBorders[row].Background = activeRow;
                     priceBorders[row].Background = activeRow;
                     askBorders[row].Background = activeRow;
+                    volumeBorders[row].Background = activeRow;
+                    deltaBorders[row].Background = activeRow;
 
                     bidCells[row].Foreground = Brushes.Black;
                     priceCells[row].Foreground = Brushes.Black;
@@ -4274,6 +4279,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     bidBorders[row].Background = isBidRow ? bidMarker : neutralSide;
                     priceBorders[row].Background = priceBackground;
                     askBorders[row].Background = isAskRow ? askMarker : neutralSide;
+
+                    // GDOM122 - impede que o amarelo do LAST permaneça em células
+                    // reutilizadas de VOLUME/DELTA quando o preço se desloca.
+                    volumeBorders[row].Background = neutralSide;
+                    deltaBorders[row].Background = neutralSide;
 
                     bidCells[row].Foreground = Brushes.WhiteSmoke;
                     priceCells[row].Foreground = Brushes.WhiteSmoke;
