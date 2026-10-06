@@ -1238,14 +1238,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             Button ladderUpButton = new Button
             {
-                Content = "▲ +10",
+                Content = "▲ +30",
                 Width = 72,
                 Height = 25,
                 Margin = new Thickness(2)
             };
             ladderUpButton.Click += (s, e) =>
             {
-                ladderOffsetTicks += 10;
+                ladderOffsetTicks += 30;
                 ladderManualNavigation = true;
                 UpdateDisplay();
             };
@@ -1267,14 +1267,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             Button ladderDownButton = new Button
             {
-                Content = "▼ -10",
+                Content = "▼ -30",
                 Width = 72,
                 Height = 25,
                 Margin = new Thickness(2)
             };
             ladderDownButton.Click += (s, e) =>
             {
-                ladderOffsetTicks -= 10;
+                ladderOffsetTicks -= 30;
                 ladderManualNavigation = true;
                 UpdateDisplay();
             };
@@ -1492,6 +1492,31 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 };
                 columnsMenu.Items.Add(columnItem);
             }
+
+            // GDOM123 - presets rápidos de visualização sem alterar a ordem das colunas.
+            MenuItem presetsMenu = new MenuItem { Header = "Visualização rápida..." };
+            MenuItem presetCompact = new MenuItem { Header = "COMPACTO — Preço + Volume + Delta" };
+            MenuItem presetComplete = new MenuItem { Header = "COMPLETO — Todas as colunas" };
+            Action<bool> applyPreset = (compact) =>
+            {
+                for (int rc = 0; rc < customizationColumnNames.Length; rc++)
+                {
+                    MenuItem rcItem = columnsMenu.Items[rc] as MenuItem;
+                    bool visible = compact ? (rc == 1 || rc == 3 || rc == 4) : true;
+                    if (rcItem != null) rcItem.IsChecked = visible;
+                    int visualRc = Grid.GetColumn(draggableHeaders[rc]);
+                    customizationHeaderCols[visualRc].MinWidth = 0;
+                    customizationLadderCols[visualRc].MinWidth = visible ? customizationMinWidths[rc] : 0;
+                    customizationHeaderCols[visualRc].Width = visible ? new GridLength(customizationDefaultWidths[rc], GridUnitType.Star) : new GridLength(0);
+                    customizationLadderCols[visualRc].Width = visible ? new GridLength(customizationDefaultWidths[rc], GridUnitType.Star) : new GridLength(0);
+                }
+                UpdateDisplay();
+            };
+            presetCompact.Click += (s, e) => applyPreset(true);
+            presetComplete.Click += (s, e) => applyPreset(false);
+            presetsMenu.Items.Add(presetCompact);
+            presetsMenu.Items.Add(presetComplete);
+            customizationMenu.Items.Add(presetsMenu);
 
             MenuItem indicatorsMenu = new MenuItem { Header = "Indicadores..." };
             customizationMenu.Items.Add(indicatorsMenu);
@@ -1898,7 +1923,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 return;
 
             double price;
-            if (!double.TryParse(priceCells[rowIndex].Text,
+            if (priceCells[rowIndex].Tag is double)
+                price = (double)priceCells[rowIndex].Tag;
+            else if (!double.TryParse(priceCells[rowIndex].Text,
                 System.Globalization.NumberStyles.Any,
                 System.Globalization.CultureInfo.CurrentCulture, out price))
                 return;
@@ -2628,7 +2655,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             for (int i = 0; i < LadderRows; i++)
             {
                 double rowPrice;
-                if (!double.TryParse(priceCells[i].Text,
+                if (priceCells[i].Tag is double)
+                    rowPrice = (double)priceCells[i].Tag;
+                else if (!double.TryParse(priceCells[i].Text,
                     System.Globalization.NumberStyles.Any,
                     System.Globalization.CultureInfo.CurrentCulture, out rowPrice))
                     continue;
@@ -4093,7 +4122,12 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 double levelPrice = center + (CenterRow - row) * tickSize;
                 levelPrice = currentInstrument.MasterInstrument.RoundToTickSize(levelPrice);
 
-                priceCells[row].Text = currentInstrument.MasterInstrument.FormatPrice(levelPrice);
+                string priceLabel = currentInstrument.MasterInstrument.FormatPrice(levelPrice);
+                if (SameProfilePrice(levelPrice, profilePoc)) priceLabel += "  POC";
+                else if (SameProfilePrice(levelPrice, profileVah)) priceLabel += "  VAH";
+                else if (SameProfilePrice(levelPrice, profileVal)) priceLabel += "  VAL";
+                priceCells[row].Text = priceLabel;
+                priceCells[row].Tag = levelPrice;
 
                 bidCells[row].Text = "";
                 askCells[row].Text = "";
@@ -4236,6 +4270,14 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     volumeBars[row].Opacity = daily > 0 ? 0.14 + (0.86 * visualRatio) : 0.0;
                 }
 
+                // GDOM123 - maior volume visível recebe uma borda clara discreta.
+                volumeBorders[row].BorderBrush = (daily > 0 && daily == maxDailyVisible)
+                    ? Brushes.WhiteSmoke
+                    : new SolidColorBrush(Color.FromRgb(70, 70, 73));
+                volumeBorders[row].BorderThickness = (daily > 0 && daily == maxDailyVisible)
+                    ? new Thickness(1.5)
+                    : new Thickness(0, 0, 1, 1);
+
                 // V0.9.9.44 - leitura BID / ASK / LAST dentro da ladder.
                 // LAST continua com prioridade máxima (amarelo).
                 // BID e ASK recebem apenas um realce discreto nas respectivas colunas,
@@ -4343,6 +4385,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 bidCells[i].Text = "";
                 askCells[i].Text = "";
                 priceCells[i].Text = "--";
+                priceCells[i].Tag = null;
 
                 if (buyFlowBars != null && buyFlowBars[i] != null)
                     buyFlowBars[i].Width = 0;
