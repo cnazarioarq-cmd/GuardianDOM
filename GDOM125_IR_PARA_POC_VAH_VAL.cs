@@ -1518,6 +1518,32 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             presetsMenu.Items.Add(presetComplete);
             customizationMenu.Items.Add(presetsMenu);
 
+            // GDOM125 - navegação direta para os níveis do perfil.
+            // Mantém a ladder em modo MANUAL e posiciona o nível escolhido no centro.
+            MenuItem goToMenu = new MenuItem { Header = "Ir para..." };
+            MenuItem goToPoc = new MenuItem { Header = "POC" };
+            MenuItem goToVah = new MenuItem { Header = "VAH" };
+            MenuItem goToVal = new MenuItem { Header = "VAL" };
+            MenuItem goToMarket = new MenuItem { Header = "Preço atual (CENTRALIZAR)" };
+
+            goToPoc.Click += (s, e) => NavigateToProfileLevel(profilePoc);
+            goToVah.Click += (s, e) => NavigateToProfileLevel(profileVah);
+            goToVal.Click += (s, e) => NavigateToProfileLevel(profileVal);
+            goToMarket.Click += (s, e) =>
+            {
+                ladderOffsetTicks = 0;
+                ladderManualNavigation = false;
+                ladderDisplayCenter = double.NaN;
+                UpdateDisplay();
+            };
+
+            goToMenu.Items.Add(goToPoc);
+            goToMenu.Items.Add(goToVah);
+            goToMenu.Items.Add(goToVal);
+            goToMenu.Items.Add(new Separator());
+            goToMenu.Items.Add(goToMarket);
+            customizationMenu.Items.Add(goToMenu);
+
             MenuItem indicatorsMenu = new MenuItem { Header = "Indicadores..." };
             customizationMenu.Items.Add(indicatorsMenu);
 
@@ -3959,6 +3985,31 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // A cor acompanha ganho/perda em qualquer modo de exibição.
             double signValue = marketPnlDisplayMode == 0 ? pnl : points;
             marketPnlValue.Foreground = signValue > 0 ? Brushes.LimeGreen : (signValue < 0 ? Brushes.Red : Brushes.WhiteSmoke);
+        }
+
+        // GDOM125 - leva diretamente a ladder ao POC/VAH/VAL sem alterar
+        // os dados do perfil ou o comportamento do botão CENTRALIZAR.
+        private void NavigateToProfileLevel(double targetPrice)
+        {
+            if (currentInstrument == null || double.IsNaN(targetPrice) || targetPrice <= 0)
+                return;
+
+            double anchor;
+            if (bidPrice > 0 && askPrice > 0)
+                anchor = (bidPrice + askPrice) / 2.0;
+            else if (lastPrice > 0)
+                anchor = lastPrice;
+            else
+                anchor = bidPrice > 0 ? bidPrice : askPrice;
+
+            double tickSize = currentInstrument.MasterInstrument.TickSize;
+            if (anchor <= 0 || tickSize <= 0)
+                return;
+
+            double marketCenter = currentInstrument.MasterInstrument.RoundToTickSize(anchor);
+            ladderOffsetTicks = (int)Math.Round((targetPrice - marketCenter) / tickSize);
+            ladderManualNavigation = true;
+            UpdateDisplay();
         }
 
         private void UpdateDisplay()
