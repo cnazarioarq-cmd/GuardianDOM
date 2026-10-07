@@ -1209,7 +1209,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             connectionStatus = new TextBlock
             {
-                Text = "V0.9.9.94 JANELA DUPLICAR • ENVIO SOMENTE Sim101",
+                Text = "V0.9.9.94 JANELA DUPLICAR • ENVIO NA CONTA SELECIONADA",
                 Foreground = Brushes.Gold,
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
@@ -1394,7 +1394,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             sendPreviewButton = new Button
             {
-                Content = "ENVIAR ORDEM — SOMENTE Sim101",
+                Content = "ENVIAR ORDEM — CONTA SELECIONADA",
                 Height = 28,
                 Margin = new Thickness(8, 5, 8, 0),
                 IsEnabled = false
@@ -2024,7 +2024,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 return;
 
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
-            bool sim101 = account != null && string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase);
+            bool accountReady = account != null;
             bool ready = currentInstrument != null
                 && !double.IsNaN(previewOrderPrice)
                 && previewOrderQuantity > 0
@@ -2032,16 +2032,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 && atmStrategySelector.SelectedAtmStrategy != null
                 && (previewOrderType == "LIMIT" || previewOrderType == "STOP MARKET");
 
-            sendPreviewButton.IsEnabled = sim101 && ready;
+            sendPreviewButton.IsEnabled = accountReady && ready;
         }
 
         // V0.9.9.65 - entrada imediata a mercado usando a ATM nativa selecionada.
         private void SubmitMarketEntry(bool buy)
         {
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
-            if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
+            if (account == null)
             {
-                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UMA CONTA";
                 return;
             }
 
@@ -2102,7 +2102,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     orderStateStatus.Foreground = Brushes.Gold;
                 }
                 connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • " +
-                    (buy ? "COMPRA" : "VENDA") + " MERCADO " + quantity + " • ATM • Sim101";
+                    (buy ? "COMPRA" : "VENDA") + " MERCADO " + quantity + " • ATM • " + account.Name;
             }
             catch (Exception ex)
             {
@@ -2118,9 +2118,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private void FlattenButton_Click(object sender, RoutedEventArgs e)
         {
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
-            if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
+            if (account == null)
             {
-                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UMA CONTA";
                 return;
             }
             if (currentInstrument == null)
@@ -2136,7 +2136,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     orderStateStatus.Foreground = Brushes.Gold;
                 }
                 connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • FECHAMENTO SOLICITADO • " +
-                    currentInstrument.FullName + " • Sim101";
+                    currentInstrument.FullName + " • " + account.Name;
             }
             catch (Exception ex)
             {
@@ -2144,15 +2144,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
         }
 
-        // V0.9.9.52 - primeiro envio real, EXCLUSIVAMENTE na Sim101.
-        // A entrada usa a ATM nativa selecionada; conta real continua bloqueada.
+        // GDOM128 - envio para a conta atualmente selecionada no GuardianDOM.
+        // A entrada usa a ATM nativa selecionada e a conta escolhida no seletor CONTA.
         private void SendPreviewButton_Click(object sender, RoutedEventArgs e)
         {
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
 
-            if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
+            if (account == null)
             {
-                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UMA CONTA";
                 return;
             }
 
@@ -2264,7 +2264,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     "V0.9.9.89 PERÍODO GRÁFICO • ENVIO SOLICITADO: " + previewOrderSide +
                     " " + previewOrderQuantity + " @ " +
                     currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
-                    " • " + previewOrderType + " • SUBMIT DIAGNOSTIC • Sim101";
+                    " • " + previewOrderType + " • SUBMIT DIAGNOSTIC • " + account.Name;
 
                 sendPreviewButton.IsEnabled = false;
             }
@@ -2323,9 +2323,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         {
             Account account = guardianOrderAccount;
 
-            if (account == null || !string.Equals(account.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
+            if (account == null)
             {
-                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • BLOQUEADO: SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UMA CONTA";
                 return;
             }
 
@@ -2411,7 +2411,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 connectionStatus.Text =
                     "V0.9.9.89 PERÍODO GRÁFICO • CANCELANDO " +
-                    toCancel.Count + " ORDEM(NS) GUARDIANDOM • Sim101";
+                    toCancel.Count + " ORDEM(NS) GUARDIANDOM • " + account.Name;
             }
             catch (Exception ex)
             {
@@ -2432,9 +2432,6 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private void SubmitProtectiveBracket(Order filledEntry)
         {
             if (filledEntry == null || guardianOrderAccount == null || bracketSubmittedForEntry)
-                return;
-
-            if (!string.Equals(guardianOrderAccount.Name, "Sim101", StringComparison.OrdinalIgnoreCase))
                 return;
 
             double fillPrice = filledEntry.AverageFillPrice;
@@ -2515,7 +2512,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 filledEntry.Instrument.MasterInstrument.FormatPrice(stopPrice) +
                 " • ALVO " +
                 filledEntry.Instrument.MasterInstrument.FormatPrice(targetPrice) +
-                " • OCO • Sim101";
+                " • OCO • " + guardianOrderAccount.Name;
         }
 
         private bool IsSameOrder(Order a, Order b)
@@ -2682,7 +2679,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     " • " + previewOrderSide + " " + previewOrderQuantity +
                     " @ " + (currentInstrument == null ? "--" :
                         currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice)) +
-                    " • Sim101";
+                    " • " + (guardianOrderAccount == null ? "--" : guardianOrderAccount.Name);
             }));
         }
 
@@ -2727,7 +2724,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 " " + previewOrderQuantity.ToString() +
                 " @ " + currentInstrument.MasterInstrument.FormatPrice(previewOrderPrice) +
                 " • " + previewOrderType +
-                " • PRÉVIA PRONTA • ENVIO SOMENTE Sim101";
+                " • PRÉVIA PRONTA • CONTA SELECIONADA";
         }
 
         private void OnFastPriceRefreshTimerTick(object sender, EventArgs e)
@@ -3293,11 +3290,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (currentInstrument == null)
             {
-                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UM ATIVO • ENVIO SOMENTE Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • SELECIONE UM ATIVO";
                 return;
             }
 
-            connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • CONECTANDO MARKET DATA • ENVIO SOMENTE Sim101";
+            connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • CONECTANDO MARKET DATA";
 
             marketData = new MarketData(currentInstrument);
             marketData.Update += OnMarketData;
@@ -4052,7 +4049,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (anchor <= 0)
             {
-                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO / Sim101";
+                connectionStatus.Text = "V0.9.9.89 PERÍODO GRÁFICO • AGUARDANDO COTAÇÃO • ENVIO SOMENTE POR BOTÃO";
                 return;
             }
 
@@ -4062,7 +4059,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                         : (lastVolumeBridgeVersion == -2 ? "SESSÃO 19H + AO VIVO" : "LOCAL AO VIVO"))
                     : "CARREGANDO HISTÓRICO")
                 + (ladderManualNavigation ? " • LADDER: MANUAL " + (ladderOffsetTicks >= 0 ? "+" : "") + ladderOffsetTicks.ToString() + "t" : " • LADDER: AUTO")
-                + " • ENVIO SOMENTE POR BOTÃO / Sim101";
+                + " • ENVIO SOMENTE POR BOTÃO";
 
             double tickSize = currentInstrument.MasterInstrument.TickSize;
             double marketCenter = currentInstrument.MasterInstrument.RoundToTickSize(anchor);
