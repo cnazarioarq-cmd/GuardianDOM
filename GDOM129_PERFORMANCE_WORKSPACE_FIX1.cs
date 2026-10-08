@@ -342,6 +342,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private const uint MF_SEPARATOR = 0x00000800;
         private const uint MF_STRING = 0x00000000;
 
+        // GDOM129: preferências de visualização exclusivas de cada janela no Workspace.
+        private readonly bool[] workspaceColumns = { true, true, true, true, true };
+        private bool workspaceOperationsVisible = true;
+        private Action applyWorkspaceAppearance;
+
         public WorkspaceOptions WorkspaceOptions { get; set; }
 
         // GDOM126 - integra a janela ao sistema nativo de Workspaces do NinjaTrader.
@@ -350,14 +355,28 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         // que estavam salvas nele (inclusive múltiplas janelas), sem autoabrir GDOMs extras.
         public void Save(XDocument document, XElement element)
         {
-            // A posição, tamanho e estado básico da NTWindow são tratados pelo WorkspaceOptions.
-            // Mantemos este método propositalmente leve para não alterar a lógica estável da GDOM125.
+            // Cada instância grava suas próprias colunas e seu painel de negociação.
+            if (element == null) return;
+            element.SetAttributeValue("GDOM129Operations", workspaceOperationsVisible ? "1" : "0");
+            string columnFlags = "";
+            for (int c = 0; c < workspaceColumns.Length; c++)
+                columnFlags += workspaceColumns[c] ? "1" : "0";
+            element.SetAttributeValue("GDOM129Columns", columnFlags);
         }
 
         public void Restore(XDocument document, XElement element)
         {
-            // A própria restauração do Workspace instancia esta janela pelo construtor padrão.
-            // Não criamos janelas manualmente aqui para evitar duplicação na inicialização.
+            // Restaurar somente esta janela; não criar outras instâncias.
+            if (element == null) return;
+            string columns = (string)element.Attribute("GDOM129Columns");
+            if (!string.IsNullOrEmpty(columns) && columns.Length == 5)
+                for (int c = 0; c < 5; c++)
+                    workspaceColumns[c] = columns[c] != '0';
+            string panel = (string)element.Attribute("GDOM129Operations");
+            if (panel != null) workspaceOperationsVisible = panel != "0";
+            if (applyWorkspaceAppearance != null)
+                Dispatcher.BeginInvoke(new Action(() => applyWorkspaceAppearance()),
+                    DispatcherPriority.Loaded);
         }
 
         public GuardianDomWindow()
@@ -410,7 +429,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             depthRefreshTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
-                Interval = TimeSpan.FromMilliseconds(100)
+                Interval = TimeSpan.FromMilliseconds(150)
             };
             depthRefreshTimer.Tick += OnDepthRefreshTimerTick;
             depthRefreshTimer.Start();
@@ -1476,10 +1495,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 {
                     Header = customizationColumnNames[c],
                     IsCheckable = true,
-                    IsChecked = true
+                    IsChecked = workspaceColumns[c]
                 };
                 columnItem.Click += (s, e) =>
                 {
+                    workspaceColumns[columnIndex] = columnItem.IsChecked;
                     // V0.9.9.64 - RESPONSIVE COLUMNS FIX:
                     // ocultar uma coluna nao pode reduzir a largura total da ladder.
                     // As colunas visiveis passam a usar STAR proporcional ao tamanho
@@ -1529,6 +1549,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     MenuItem rcItem = columnsMenu.Items[rc] as MenuItem;
                     bool visible = compact ? (rc == 1 || rc == 3 || rc == 4) : true;
                     if (rcItem != null) rcItem.IsChecked = visible;
+                    workspaceColumns[rc] = visible;
                     int visualRc = Grid.GetColumn(draggableHeaders[rc]);
                     customizationHeaderCols[visualRc].MinWidth = 0;
                     customizationLadderCols[visualRc].MinWidth = visible ? customizationMinWidths[rc] : 0;
@@ -1606,10 +1627,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // Desmarcar recolhe COMPRA / PnL / VENDA e FECHAMENTO, liberando o espaço
             // vertical para a ladder. POC / VAH / VAL permanece visível e o estado
             // não é compartilhado entre GuardianDOMs vinculados.
-            MenuItem orderButtonsMenu = new MenuItem { Header = "Painel de operações", IsCheckable = true, IsChecked = true };
+            MenuItem orderButtonsMenu = new MenuItem { Header = "Painel de operações", IsCheckable = true, IsChecked = workspaceOperationsVisible };
             orderButtonsMenu.Click += (s, e) =>
             {
                 bool panelAtivo = orderButtonsMenu.IsChecked;
+                workspaceOperationsVisible = panelAtivo;
                 Visibility v = panelAtivo ? Visibility.Visible : Visibility.Collapsed;
                 quickTradePanel.Visibility = v;
                 if (flattenButton != null) flattenButton.Visibility = v;
@@ -1635,6 +1657,30 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 }
                 UpdateDisplay();
             };
+            // Aplicação idempotente das preferências restauradas pelo Workspace.
+            applyWorkspaceAppearance = () =>
+            {
+                for (int rc = 0; rc < 5; rc++)
+                {
+                    MenuItem item = columnsMenu.Items[rc] as MenuItem;
+                    if (item != null) item.IsChecked = workspaceColumns[rc];
+                    int visual = Grid.GetColumn(draggableHeaders[rc]);
+                    bool visible = workspaceColumns[rc];
+                    customizationHeaderCols[visual].MinWidth = 0;
+                    customizationLadderCols[visual].MinWidth = visible ? customizationMinWidths[rc] : 0;
+                    customizationHeaderCols[visual].Width = visible
+                        ? new GridLength(customizationDefaultWidths[rc], GridUnitType.Star)
+                        : new GridLength(0);
+                    customizationLadderCols[visual].Width = visible
+                        ? new GridLength(customizationDefaultWidths[rc], GridUnitType.Star)
+                        : new GridLength(0);
+                }
+                orderButtonsMenu.IsChecked = workspaceOperationsVisible;
+                // Reaproveita o mesmo manipulador de UI (inclusive altura da ladder).
+                orderButtonsMenu.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                UpdateDisplay();
+            };
+            Dispatcher.BeginInvoke(new Action(() => applyWorkspaceAppearance()), DispatcherPriority.Loaded);
             customizationMenu.Items.Add(orderButtonsMenu);
 
             MenuItem ladderColorMenu = new MenuItem { Header = "Cor de fundo da ladder..." };
@@ -1668,6 +1714,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     customizationLadderCols[c].Width = new GridLength(customizationDefaultWidths[c]);
                     if (c < columnsMenu.Items.Count && columnsMenu.Items[c] is MenuItem)
                         ((MenuItem)columnsMenu.Items[c]).IsChecked = true;
+                    if (c < workspaceColumns.Length) workspaceColumns[c] = true;
                 }
 
                 quotePanel.Visibility = Visibility.Visible;
@@ -1678,6 +1725,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 quickTradePanel.Visibility = Visibility.Visible;
                 if (flattenButton != null) flattenButton.Visibility = Visibility.Visible;
                 orderButtonsMenu.IsChecked = true;
+                workspaceOperationsVisible = true;
                 quotesMenu.IsChecked = true;
                 aggressionMenu.IsChecked = true;
                 orderStateMenu.IsChecked = true;
