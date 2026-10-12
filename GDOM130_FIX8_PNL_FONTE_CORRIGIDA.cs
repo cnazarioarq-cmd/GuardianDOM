@@ -157,6 +157,10 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private string startupInstrumentName = string.Empty;
 
         private Instrument currentInstrument;
+        // GDOM130: seleção explícita de preço para ordem limitada.
+        private string pendingLimitSide = string.Empty;
+        private Grid limitButtonsPanel;
+
 
         // V0.9.9.94 - vínculo de ativo entre janelas Guardian DOM.
         // Janelas com a mesma cor acompanham a troca de ativo umas das outras.
@@ -423,6 +427,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             // O nome e salvo em GuardianDOM_LastInstrument.txt e a restauracao manual
             // so comeca depois que a janela terminou de carregar. Isso evita depender
             // do LastUsedGroup do InstrumentSelector.
+            PreviewKeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Escape && !string.IsNullOrEmpty(pendingLimitSide))
+                {
+                    pendingLimitSide = string.Empty;
+                    if (orderStateStatus != null) orderStateStatus.Text = "ORDEM: SELEÇÃO LIMIT CANCELADA";
+                    e.Handled = true;
+                }
+            };
             Loaded += GuardianDomWindow_LoadedRestoreInstrument;
             Loaded += GuardianDomWindow_LoadedInstallTitleLink;
 
@@ -494,31 +507,22 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             string instrumentName = currentInstrument != null ? currentInstrument.FullName : ReadLastInstrumentName();
             int periodMinutes = selectedPeriodMinutes;
             int quantity = quantitySelector != null ? quantitySelector.Value : 1;
-
-            // GDOM130: a duplicação herda a aparência da janela de origem,
-            // sem alterar as preferências das outras janelas ou o Workspace.
+            // GDOM130 FIX2: copiar o estado visual da janela de origem.
             bool[] sourceColumns = (bool[])workspaceColumns.Clone();
             bool sourceOperationsVisible = workspaceOperationsVisible;
-            double sourceWidth = Width;
-            double sourceHeight = Height;
-            bool sourceTopmost = Topmost;
 
             GuardianDomWindow duplicate = new GuardianDomWindow();
-            Array.Copy(sourceColumns, duplicate.workspaceColumns, sourceColumns.Length);
-            duplicate.workspaceOperationsVisible = sourceOperationsVisible;
-            if (!double.IsNaN(sourceWidth) && sourceWidth > 0)
-                duplicate.Width = sourceWidth;
-            if (!double.IsNaN(sourceHeight) && sourceHeight > 0)
-                duplicate.Height = sourceHeight;
-            duplicate.Topmost = sourceTopmost;
             duplicate.Show();
 
             duplicate.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
             {
                 try
                 {
-                    // A UI já foi construída com o snapshot visual acima.
-                    // Reaplica depois de Loaded para garantir colunas e painel.
+                    // Aplicar o mesmo preset de colunas e a visibilidade do painel
+                    // somente na nova janela, após sua interface estar carregada.
+                    for (int c = 0; c < sourceColumns.Length; c++)
+                        duplicate.workspaceColumns[c] = sourceColumns[c];
+                    duplicate.workspaceOperationsVisible = sourceOperationsVisible;
                     if (duplicate.applyWorkspaceAppearance != null)
                         duplicate.applyWorkspaceAppearance();
 
@@ -1008,10 +1012,24 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
                 int previewRow = i;
                 priceCells[i].Cursor = Cursors.Hand;
-                priceCells[i].MouseLeftButtonDown +=
-                    (s, e) => PreviewOrderAtRow(previewRow, "COMPRA");
-                priceCells[i].MouseRightButtonDown +=
-                    (s, e) => PreviewOrderAtRow(previewRow, "VENDA");
+                priceCells[i].MouseLeftButtonDown += (s, e) =>
+                {
+                    if (!string.IsNullOrEmpty(pendingLimitSide))
+                    {
+                        ConfirmLimitAtRow(previewRow);
+                        e.Handled = true;
+                    }
+                    else PreviewOrderAtRow(previewRow, "COMPRA");
+                };
+                priceCells[i].MouseRightButtonDown += (s, e) =>
+                {
+                    if (!string.IsNullOrEmpty(pendingLimitSide))
+                    {
+                        ConfirmLimitAtRow(previewRow);
+                        e.Handled = true;
+                    }
+                    else PreviewOrderAtRow(previewRow, "VENDA");
+                };
 
                 // V0.9.9.61 - rolagem direta na coluna PREÇO.
                 // Cada passo da roda desloca 1 tick para permitir buscar um preço específico.
@@ -1359,6 +1377,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             quickTradePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34, GridUnitType.Star) });
             quickTradePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(33, GridUnitType.Star) });
 
+            quickTradePanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(27) });
+            quickTradePanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
+
             marketBuyButton = new Button
             {
                 Content = "COMPRA MERC.",
@@ -1371,6 +1392,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             };
             marketBuyButton.Click += (s, e) => SubmitMarketEntry(true);
             Grid.SetColumn(marketBuyButton, 0);
+            Grid.SetRow(marketBuyButton, 1);
             quickTradePanel.Children.Add(marketBuyButton);
 
             Border pnlBox = new Border
@@ -1379,18 +1401,36 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 BorderBrush = new SolidColorBrush(Color.FromRgb(80, 80, 82)),
                 BorderThickness = new Thickness(1),
                 Margin = new Thickness(2, 0, 2, 0),
-                Height = 30
+                VerticalAlignment = VerticalAlignment.Stretch
             };
             marketPnlValue = new TextBlock
             {
-                Text = "PnL  $ 0,00",
+                Text = "$ 0,00",
                 Foreground = Brushes.WhiteSmoke,
-                FontSize = 14,
+                FontSize = 18,
                 FontWeight = FontWeights.Bold,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            pnlBox.Child = marketPnlValue;
+            // GDOM130 FIX4: título fixo na linha superior; resultado/unidade na inferior.
+            Grid pnlContent = new Grid();
+            pnlContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            pnlContent.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            TextBlock pnlTitle = new TextBlock
+            {
+                Text = "PnL",
+                Foreground = Brushes.WhiteSmoke,
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Bottom
+            };
+            Grid.SetRow(pnlTitle, 0);
+            pnlContent.Children.Add(pnlTitle);
+            marketPnlValue.VerticalAlignment = VerticalAlignment.Top;
+            Grid.SetRow(marketPnlValue, 1);
+            pnlContent.Children.Add(marketPnlValue);
+            pnlBox.Child = pnlContent;
             pnlBox.Cursor = Cursors.Hand;
             pnlBox.ToolTip = "Clique para alternar: moeda → ticks → pontos";
             pnlBox.MouseLeftButtonDown += (s, e) =>
@@ -1400,13 +1440,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 e.Handled = true;
             };
             Grid.SetColumn(pnlBox, 1);
+            Grid.SetRow(pnlBox, 0);
+            Grid.SetRowSpan(pnlBox, 2);
             quickTradePanel.Children.Add(pnlBox);
 
             marketSellButton = new Button
             {
                 Content = "VENDA MERC.",
                 Height = 30,
-                FontSize = 14,
+                FontSize = 12,
                 FontWeight = FontWeights.Bold,
                 Margin = new Thickness(2, 0, 0, 0),
                 Background = Brushes.DarkRed,
@@ -1414,8 +1456,33 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             };
             marketSellButton.Click += (s, e) => SubmitMarketEntry(false);
             Grid.SetColumn(marketSellButton, 2);
+            Grid.SetRow(marketSellButton, 1);
             quickTradePanel.Children.Add(marketSellButton);
 
+            // GDOM130: LIMIT acima de MERC. nas mesmas colunas;
+            // PnL ocupa as duas linhas centrais, sem duplicar painel.
+            Button limitBuyButton = new Button
+            {
+                Content = "COMPRA LIMITE", Height = 27, FontSize = 12,
+                FontWeight = FontWeights.Bold, Background = Brushes.Green,
+                Foreground = Brushes.White, Margin = new Thickness(0, 0, 2, 2)
+            };
+            Button limitSellButton = new Button
+            {
+                Content = "VENDA LIMITE", Height = 27, FontSize = 12,
+                FontWeight = FontWeights.Bold, Background = Brushes.DarkRed,
+                Foreground = Brushes.White, Margin = new Thickness(2, 0, 0, 2)
+            };
+            limitBuyButton.Click += (s, e) => BeginLimitSelection("COMPRA");
+            limitSellButton.Click += (s, e) => BeginLimitSelection("VENDA");
+            Grid.SetColumn(limitBuyButton, 0);
+            Grid.SetRow(limitBuyButton, 0);
+            Grid.SetColumn(limitSellButton, 2);
+            Grid.SetRow(limitSellButton, 0);
+            quickTradePanel.Children.Add(limitBuyButton);
+            quickTradePanel.Children.Add(limitSellButton);
+            // Mesma grade controla a visibilidade de todos os botões e do PnL.
+            limitButtonsPanel = quickTradePanel;
             statusPanel.Children.Add(quickTradePanel);
 
             flattenButton = new Button
@@ -1654,6 +1721,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 workspaceOperationsVisible = panelAtivo;
                 Visibility v = panelAtivo ? Visibility.Visible : Visibility.Collapsed;
                 quickTradePanel.Visibility = v;
+                if (limitButtonsPanel != null) limitButtonsPanel.Visibility = v;
                 if (flattenButton != null) flattenButton.Visibility = v;
 
                 // GDOM105 - no modo de acompanhamento, os controles manuais de navegação
@@ -1743,6 +1811,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 profileStatus.Visibility = Visibility.Visible;
                 navigationPanel.Visibility = Visibility.Visible;
                 quickTradePanel.Visibility = Visibility.Visible;
+                if (limitButtonsPanel != null) limitButtonsPanel.Visibility = Visibility.Visible;
                 if (flattenButton != null) flattenButton.Visibility = Visibility.Visible;
                 orderButtonsMenu.IsChecked = true;
                 workspaceOperationsVisible = true;
@@ -2034,6 +2103,71 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
 
             if (Caption != "Guardian DOM")
                 Caption = "Guardian DOM";
+        }
+
+        private void BeginLimitSelection(string side)
+        {
+            pendingLimitSide = side;
+            if (orderStateStatus != null)
+            {
+                orderStateStatus.Text = "LIMITE " + side + " • CLIQUE NO PREÇO • ESC CANCELA";
+                orderStateStatus.Foreground = Brushes.Gold;
+            }
+        }
+
+        private void ConfirmLimitAtRow(int rowIndex)
+        {
+            string side = pendingLimitSide;
+            if (string.IsNullOrEmpty(side) || currentInstrument == null ||
+                rowIndex < 0 || rowIndex >= LadderRows) return;
+            pendingLimitSide = string.Empty;
+            double price;
+            if (priceCells[rowIndex].Tag is double)
+                price = (double)priceCells[rowIndex].Tag;
+            else return;
+            price = currentInstrument.MasterInstrument.RoundToTickSize(price);
+            Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
+            if (account == null || atmStrategySelector == null ||
+                atmStrategySelector.SelectedAtmStrategy == null)
+            {
+                MessageBox.Show("Selecione uma conta e uma estratégia ATM antes de enviar.",
+                    "GuardianDOM — LIMIT", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            // Impede LIMIT negociável que pode executar imediatamente.
+            if ((side == "COMPRA" && (double.IsNaN(askPrice) || askPrice <= 0 || price >= askPrice)) ||
+                (side == "VENDA" && (double.IsNaN(bidPrice) || bidPrice <= 0 || price <= bidPrice)))
+            {
+                MessageBox.Show("Preço LIMIT inválido para uma ordem passiva. " +
+                    "COMPRA deve ficar abaixo do ASK e VENDA acima do BID.",
+                    "GuardianDOM — LIMIT", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            PreviewOrderAtRow(rowIndex, side);
+            // PreviewOrderAtRow normalmente classifica a ordem; LIMIT é obrigatório aqui.
+            previewOrderType = "LIMIT";
+            previewOrderPrice = price;
+            UpdateSendButtonState();
+            int quantity = previewOrderQuantity;
+            MessageBoxResult result = MessageBox.Show(
+                side + " LIMIT • " + currentInstrument.FullName +
+                "\nConta: " + account.Name + "\nQuantidade: " + quantity +
+                "\nPreço: " + price.ToString(System.Globalization.CultureInfo.CurrentCulture) +
+                "\nATM: " + atmStrategySelector.SelectedAtmStrategy.ToString() +
+                "\n\nConfirmar envio?",
+                "GuardianDOM — Confirmar ordem LIMIT",
+                MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+            if (result != MessageBoxResult.Yes) return;
+            // Revalida conta e cotação antes da submissão.
+            if (!object.ReferenceEquals(account, accountSelector.SelectedAccount) ||
+                (side == "COMPRA" && price >= askPrice) ||
+                (side == "VENDA" && price <= bidPrice))
+            {
+                MessageBox.Show("Conta ou cotação mudou. Selecione novamente o preço.",
+                    "GuardianDOM — LIMIT", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            SendPreviewButton_Click(this, new RoutedEventArgs());
         }
 
         private void PreviewOrderAtRow(int rowIndex, string side)
@@ -4045,11 +4179,11 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             }
 
             if (marketPnlDisplayMode == 1)
-                marketPnlValue.Text = "PnL  " + ticks.ToString("0.##") + " ticks";
+                marketPnlValue.Text = ticks.ToString("0.##") + " ticks";
             else if (marketPnlDisplayMode == 2)
-                marketPnlValue.Text = "PnL  " + points.ToString("0.00") + " pts";
+                marketPnlValue.Text = points.ToString("0.00") + " pts";
             else
-                marketPnlValue.Text = "PnL  " + pnl.ToString("C2");
+                marketPnlValue.Text = "$ " + pnl.ToString("N2", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
 
             // A cor acompanha ganho/perda em qualquer modo de exibição.
             double signValue = marketPnlDisplayMode == 0 ? pnl : points;
@@ -4684,7 +4818,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             if (flattenButton != null) flattenButton.FontSize = buttonFont;
             if (sendPreviewButton != null) sendPreviewButton.FontSize = buttonFont;
             if (cancelOrderButton != null) cancelOrderButton.FontSize = buttonFont;
-            if (marketPnlValue != null) marketPnlValue.FontSize = buttonFont;
+            if (marketPnlValue != null) marketPnlValue.FontSize = 18.0; // FIX8: preservar fonte do resultado do PnL no redimensionamento
 
             if (connectionStatus != null) connectionStatus.FontSize = statusFont;
             if (profileStatus != null) profileStatus.FontSize = statusFont;
