@@ -495,13 +495,33 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
             int periodMinutes = selectedPeriodMinutes;
             int quantity = quantitySelector != null ? quantitySelector.Value : 1;
 
+            // GDOM130: a duplicação herda a aparência da janela de origem,
+            // sem alterar as preferências das outras janelas ou o Workspace.
+            bool[] sourceColumns = (bool[])workspaceColumns.Clone();
+            bool sourceOperationsVisible = workspaceOperationsVisible;
+            double sourceWidth = Width;
+            double sourceHeight = Height;
+            bool sourceTopmost = Topmost;
+
             GuardianDomWindow duplicate = new GuardianDomWindow();
+            Array.Copy(sourceColumns, duplicate.workspaceColumns, sourceColumns.Length);
+            duplicate.workspaceOperationsVisible = sourceOperationsVisible;
+            if (!double.IsNaN(sourceWidth) && sourceWidth > 0)
+                duplicate.Width = sourceWidth;
+            if (!double.IsNaN(sourceHeight) && sourceHeight > 0)
+                duplicate.Height = sourceHeight;
+            duplicate.Topmost = sourceTopmost;
             duplicate.Show();
 
             duplicate.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
             {
                 try
                 {
+                    // A UI já foi construída com o snapshot visual acima.
+                    // Reaplica depois de Loaded para garantir colunas e painel.
+                    if (duplicate.applyWorkspaceAppearance != null)
+                        duplicate.applyWorkspaceAppearance();
+
                     duplicate.instrumentLinkGroup = instrumentLinkGroup;
                     duplicate.SaveInstrumentLinkGroup();
 
