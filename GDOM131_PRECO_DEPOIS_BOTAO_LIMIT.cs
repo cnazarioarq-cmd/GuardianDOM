@@ -159,6 +159,9 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
         private Instrument currentInstrument;
         // GDOM130: seleção explícita de preço para ordem limitada.
         private string pendingLimitSide = string.Empty;
+        // GDOM131: preço escolhido primeiro, botão LIMIT confirma depois.
+        private double selectedLadderLimitPrice = double.NaN;
+        private string selectedLadderInstrument = string.Empty;
         private Grid limitButtonsPanel;
 
 
@@ -1014,21 +1017,15 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 priceCells[i].Cursor = Cursors.Hand;
                 priceCells[i].MouseLeftButtonDown += (s, e) =>
                 {
-                    if (!string.IsNullOrEmpty(pendingLimitSide))
-                    {
-                        ConfirmLimitAtRow(previewRow);
-                        e.Handled = true;
-                    }
-                    else PreviewOrderAtRow(previewRow, "COMPRA");
+                    PreviewOrderAtRow(previewRow, "COMPRA");
+                    RememberSelectedLadderPrice(previewRow);
+                    e.Handled = true;
                 };
                 priceCells[i].MouseRightButtonDown += (s, e) =>
                 {
-                    if (!string.IsNullOrEmpty(pendingLimitSide))
-                    {
-                        ConfirmLimitAtRow(previewRow);
-                        e.Handled = true;
-                    }
-                    else PreviewOrderAtRow(previewRow, "VENDA");
+                    PreviewOrderAtRow(previewRow, "VENDA");
+                    RememberSelectedLadderPrice(previewRow);
+                    e.Handled = true;
                 };
 
                 // V0.9.9.61 - rolagem direta na coluna PREÇO.
@@ -2105,26 +2102,42 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 Caption = "Guardian DOM";
         }
 
-        private void BeginLimitSelection(string side)
+        // A escolha do preço é explícita e não envia ordem.
+        private void RememberSelectedLadderPrice(int rowIndex)
         {
-            pendingLimitSide = side;
+            if (currentInstrument == null || rowIndex < 0 || rowIndex >= LadderRows)
+                return;
+            if (!(priceCells[rowIndex].Tag is double))
+                return;
+            selectedLadderLimitPrice = currentInstrument.MasterInstrument.RoundToTickSize(
+                (double)priceCells[rowIndex].Tag);
+            selectedLadderInstrument = currentInstrument.FullName;
             if (orderStateStatus != null)
             {
-                orderStateStatus.Text = "LIMITE " + side + " • CLIQUE NO PREÇO • ESC CANCELA";
+                orderStateStatus.Text = "PREÇO " +
+                    selectedLadderLimitPrice.ToString(System.Globalization.CultureInfo.CurrentCulture) +
+                    " SELECIONADO • ESCOLHA COMPRA/VENDA LIMITE";
                 orderStateStatus.Foreground = Brushes.Gold;
             }
         }
 
-        private void ConfirmLimitAtRow(int rowIndex)
+        private void BeginLimitSelection(string side)
         {
-            string side = pendingLimitSide;
-            if (string.IsNullOrEmpty(side) || currentInstrument == null ||
-                rowIndex < 0 || rowIndex >= LadderRows) return;
-            pendingLimitSide = string.Empty;
-            double price;
-            if (priceCells[rowIndex].Tag is double)
-                price = (double)priceCells[rowIndex].Tag;
-            else return;
+            if (currentInstrument == null || double.IsNaN(selectedLadderLimitPrice) ||
+                !string.Equals(selectedLadderInstrument, currentInstrument.FullName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show("Primeiro clique no preço desejado na coluna PREÇO da ladder. " +
+                    "Depois clique em " + side + " LIMITE.",
+                    "GuardianDOM — LIMIT", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            ConfirmLimitAtPrice(selectedLadderLimitPrice, side);
+        }
+
+        private void ConfirmLimitAtPrice(double price, string side)
+        {
+            if (currentInstrument == null || double.IsNaN(price)) return;
             price = currentInstrument.MasterInstrument.RoundToTickSize(price);
             Account account = accountSelector == null ? null : accountSelector.SelectedAccount;
             if (account == null || atmStrategySelector == null ||
@@ -2134,7 +2147,7 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     "GuardianDOM — LIMIT", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            // Impede LIMIT negociável que pode executar imediatamente.
+            // Apenas LIMIT passiva; evita execução imediata não intencional.
             if ((side == "COMPRA" && (double.IsNaN(askPrice) || askPrice <= 0 || price >= askPrice)) ||
                 (side == "VENDA" && (double.IsNaN(bidPrice) || bidPrice <= 0 || price <= bidPrice)))
             {
@@ -2143,12 +2156,16 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                     "GuardianDOM — LIMIT", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            PreviewOrderAtRow(rowIndex, side);
-            // PreviewOrderAtRow normalmente classifica a ordem; LIMIT é obrigatório aqui.
-            previewOrderType = "LIMIT";
+
+            int quantity = quantitySelector != null && quantitySelector.Value > 0
+                ? (int)quantitySelector.Value : 1;
             previewOrderPrice = price;
+            previewOrderQuantity = quantity;
+            previewOrderSide = side;
+            previewOrderType = "LIMIT";
+            UpdateOrderPreviewVisual();
             UpdateSendButtonState();
-            int quantity = previewOrderQuantity;
+
             MessageBoxResult result = MessageBox.Show(
                 side + " LIMIT • " + currentInstrument.FullName +
                 "\nConta: " + account.Name + "\nQuantidade: " + quantity +
@@ -2158,15 +2175,20 @@ namespace NinjaTrader.NinjaScript.AddOns.GuardianDOM
                 "GuardianDOM — Confirmar ordem LIMIT",
                 MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
             if (result != MessageBoxResult.Yes) return;
-            // Revalida conta e cotação antes da submissão.
             if (!object.ReferenceEquals(account, accountSelector.SelectedAccount) ||
-                (side == "COMPRA" && price >= askPrice) ||
-                (side == "VENDA" && price <= bidPrice))
+                !string.Equals(selectedLadderInstrument, currentInstrument.FullName,
+                    StringComparison.OrdinalIgnoreCase) ||
+                selectedLadderLimitPrice != price ||
+                (side == "COMPRA" && (double.IsNaN(askPrice) || askPrice <= 0 || price >= askPrice)) ||
+                (side == "VENDA" && (double.IsNaN(bidPrice) || bidPrice <= 0 || price <= bidPrice)))
             {
-                MessageBox.Show("Conta ou cotação mudou. Selecione novamente o preço.",
+                MessageBox.Show("Conta, ativo, preço ou cotação mudou. Selecione novamente.",
                     "GuardianDOM — LIMIT", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
+            // Consome a seleção para impedir reenvio acidental com um clique.
+            selectedLadderLimitPrice = double.NaN;
+            selectedLadderInstrument = string.Empty;
             SendPreviewButton_Click(this, new RoutedEventArgs());
         }
 
